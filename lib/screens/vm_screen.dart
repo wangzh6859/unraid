@@ -92,13 +92,14 @@ class _VmScreenState extends State<VmScreen> {
     }
 
     if (_vms.isEmpty) {
-      return Center(
+      return const Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             Icon(Icons.dvr_outlined, size: 48, color: AppColors.textFaint),
             SizedBox(height: 12),
-            Text('还没有虚拟机', style: TextStyle(color: AppColors.textSecondary)),
+            Text('还没有虚拟机',
+                style: TextStyle(color: AppColors.textSecondary)),
           ],
         ),
       );
