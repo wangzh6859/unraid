@@ -27,6 +27,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   ArraySnapshot? _array;
   MetricsSnapshot? _metrics;
   List<NetworkRateInfo>? _rates;
+  List<TemperatureSensor>? _temps;
 
   String? _errInfo;
   String? _errArray;
@@ -36,6 +37,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // （避免网络抖动导致一次失败就永久隐藏）
   bool _netSupported = true;
   int _netFailures = 0;
+
+  // 温度传感器（metrics.temperature）：同样做能力检测
+  bool _tempSupported = true;
+  int _tempFailures = 0;
 
   bool _initialLoading = true;
   bool _arrayBusy = false;
@@ -92,12 +97,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
 
+    List<TemperatureSensor>? temps;
+    if (_tempSupported) {
+      final t = await _guard(() => widget.api.fetchTemperatureSensors());
+      if (t.$1 != null) {
+        temps = t.$1;
+        _tempFailures = 0;
+      } else {
+        _tempFailures++;
+        if (_tempFailures >= 2) {
+          _tempSupported = false; // 该 Unraid 版本没有 metrics.temperature
+          temps = null;
+        }
+      }
+    }
+
     if (!mounted) return;
     setState(() {
       if (info != null) _info = info;
       if (array != null) _array = array;
       if (metrics != null) _metrics = metrics;
       if (rates != null) _rates = rates;
+      if (temps != null) _temps = temps;
       _errInfo = infoErr;
       _errArray = arrayErr;
       _errMetrics = metricsErr;
@@ -132,11 +153,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
       array = arr;
     }
 
+    List<TemperatureSensor>? temps;
+    if (_tempSupported) {
+      final t = await _guard(() => widget.api.fetchTemperatureSensors());
+      if (t.$1 != null) {
+        temps = t.$1;
+        _tempFailures = 0;
+      } else {
+        _tempFailures++;
+        if (_tempFailures >= 2) {
+          _tempSupported = false;
+          temps = null;
+        }
+      }
+    }
+
     if (!mounted) return;
     setState(() {
       if (metrics != null) _metrics = metrics;
       if (rates != null) _rates = rates;
       if (array != null) _array = array;
+      if (temps != null) _temps = temps;
     });
   }
 
@@ -458,9 +495,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           if (_errMetrics != null) _buildSectionError(_errMetrics!),
 
+          // ------- GPU（静态信息 + lm-sensors 温度）-------
+          if ((_info?.gpu.isNotEmpty ?? false) || _gpuTempC != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.memory_rounded,
+                      size: 18, color: AppColors.textSecondary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _info != null && _info!.gpu.isNotEmpty
+                          ? _info!.gpu.map((g) => g.label).join(' / ')
+                          : 'GPU',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                          fontSize: 13.5),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (_gpuTempC != null)
+                    Text('${_gpuTempC!.toStringAsFixed(0)}°C',
+                        style: TextStyle(
+                            color: AppColors.orange,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13.5)),
+                ],
+              ),
+            ),
+          ],
+
           const SizedBox(height: 16),
 
-          // ------- 存储空间总览 -------
+          // ------- 存储空间（含磁盘明细）-------
           if (_array != null && _array!.capacity.totalKb > 0)
             Container(
               padding: const EdgeInsets.all(18),
@@ -505,6 +580,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     style: TextStyle(
                         fontSize: 12.5, color: AppColors.textFaint),
                   ),
+                  if (_array!.disks.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Divider(color: AppColors.border, height: 20),
+                    ..._array!.disks.map((d) => _buildDiskRow(d)),
+                  ],
                 ],
               ),
             ),
@@ -569,87 +649,109 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   )),
           ],
 
-          // ------- 磁盘列表 -------
-          if (_array != null && _array!.disks.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            Text(
-              '磁盘状态',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary),
-            ),
-            const SizedBox(height: 12),
-            ..._array!.disks.map((d) => InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => DiskDetailScreen(
-                              disk: d,
-                              baseUrl: widget.api.baseUrl,
-                            )),
-                  ),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.circle,
-                            size: 9,
-                            color: d.isHealthy ? AppColors.green : AppColors.red),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(d.name,
-                                  style: TextStyle(
-                                      color: AppColors.textPrimary,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600),
-                                  overflow: TextOverflow.ellipsis),
-                              const SizedBox(height: 2),
-                              Text(
-                                d.fsSizeKb > 0
-                                    ? '${d.runStateLabel} · 已用 ${d.usedLabel}/${d.totalLabel}'
-                                    : d.runStateLabel,
-                                style: TextStyle(
-                                    fontSize: 12, color: AppColors.textFaint),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (d.tempC != null) ...[
-                          Text('${d.tempC}°C',
-                              style: TextStyle(
-                                  color: AppColors.textSecondary, fontSize: 13)),
-                          const SizedBox(width: 6),
-                        ],
-                        Icon(Icons.chevron_right_rounded,
-                            size: 20, color: AppColors.textFaint),
-                      ],
-                    ),
-                  ),
-                )),
-          ],
-
           const SizedBox(height: 24),
         ],
       ),
     );
   }
 
+  /// 磁盘状态光点颜色：异常红 / 未挂载灰 / 休眠黄 / 运行中绿
+  Color _diskDotColor(ArrayDiskInfo d) {
+    if (!d.isHealthy) return AppColors.red;
+    if (!d.isMounted) return AppColors.textFaint;
+    if (d.isSpinning == false) return AppColors.yellow;
+    return AppColors.green;
+  }
+
+  Widget _buildDiskRow(ArrayDiskInfo d) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+            builder: (_) => DiskDetailScreen(
+                  disk: d,
+                  baseUrl: widget.api.baseUrl,
+                )),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: AppColors.border, width: 0.6),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.circle, size: 9, color: _diskDotColor(d)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(d.name,
+                      style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(
+                    d.fsSizeKb > 0
+                        ? '${d.runStateLabel} · 已用 ${d.usedLabel}/${d.totalLabel}'
+                        : d.runStateLabel,
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.textFaint),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            if (d.tempC != null) ...[
+              Text('${d.tempC}°C',
+                  style: TextStyle(
+                      color: AppColors.textSecondary, fontSize: 13)),
+              const SizedBox(width: 6),
+            ],
+            Icon(Icons.chevron_right_rounded,
+                size: 20, color: AppColors.textFaint),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// CPU 温度：优先用温度传感器（metrics.temperature），退回 info.cpu.packages
+  double? get _cpuTempC {
+    final temps = _temps;
+    if (temps == null) return null;
+    final packages = temps.where((t) => t.type == 'CPU_PACKAGE').toList();
+    if (packages.isNotEmpty) {
+      return packages
+              .map((t) => t.valueCelsius)
+              .reduce((a, b) => a + b) /
+          packages.length;
+    }
+    final cores = temps.where((t) => t.type == 'CPU_CORE').toList();
+    if (cores.isNotEmpty) {
+      return cores.map((t) => t.valueCelsius).reduce((a, b) => a + b) /
+          cores.length;
+    }
+    return null;
+  }
+
+  /// GPU 温度（lm-sensors 能读到才返回）
+  double? get _gpuTempC {
+    final temps = _temps;
+    if (temps == null) return null;
+    final gpu = temps.where((t) => t.type == 'GPU').toList();
+    if (gpu.isEmpty) return null;
+    return gpu.map((t) => t.valueCelsius).reduce((a, b) => a + b) / gpu.length;
+  }
+
   String _cpuTempAndSpeedLabel() {
     final info = _info;
     final speed = info?.cpuSpeedGhz;
-    final temp = info?.cpuAvgTemp;
+    final temp = _cpuTempC ?? info?.cpuAvgTemp;
     if (temp != null && speed != null) {
       return '${temp.toStringAsFixed(0)}°C · ${speed.toStringAsFixed(2)}GHz';
     }
