@@ -235,11 +235,13 @@ class WebdavService {
     return dir;
   }
 
-  /// 下载文件到本地，返回本地路径（供系统应用打开）。
-  /// [location] 取值见 StorageService.saveLocation*：
-  ///   cache（0，默认，会被缓存上限清理）/ documents（1，持久保存）/
-  ///   custom（2，使用 [customPath] 手动指定的目录）。
-  /// 自定义目录不可写（比如 Android 分区存储限制）时自动回退到应用文档目录。
+  /// 下载（预览/打开）文件到本地，返回本地路径。
+  /// 文件统一保存在"保存位置目录 / temp"子目录下（temp 视为缓存区，
+  /// 会参与"缓存上限"清理）：
+  ///   cache（0，默认）→ 应用缓存目录/temp
+  ///   documents（1）   → 应用文档目录/temp
+  ///   custom（2）      → 手动指定目录/temp（如 Download/temp）
+  /// 目标目录不可写（比如 Android 分区存储限制）时自动回退到应用文档目录/temp。
   Future<String> downloadToLocal(
     String remotePath,
     String name, {
@@ -247,32 +249,44 @@ class WebdavService {
     String? customPath,
     void Function(num count, num total)? onProgress,
   }) async {
-    final primary = await _resolveDir(location, customPath);
+    final primary = await _resolveTempDir(location, customPath);
     try {
       return await _downloadInto(primary, remotePath, name, onProgress);
     } catch (_) {
-      // 回退到文档目录（缓存目录失败也回退，尽量保证能保存）
+      // 回退到文档目录/temp
       return await _downloadInto(
-          await _documentsDir(), remotePath, name, onProgress);
+          await _resolveTempDir(StorageService.saveLocationDocuments, null),
+          remotePath,
+          name,
+          onProgress);
     }
   }
 
-  Future<Directory> _resolveDir(int location, String? customPath) async {
+  /// 保存位置目录下的 temp 子目录（不存在则创建）
+  Future<Directory> _resolveTempDir(int location, String? customPath) async {
+    Directory base;
     switch (location) {
       case StorageService.saveLocationDocuments:
-        return await _documentsDir();
+        base = await _documentsDir();
+        break;
       case StorageService.saveLocationCustom:
         if (customPath == null || customPath.isEmpty) {
           throw WebdavException('未选择自定义目录');
         }
-        final dir = Directory(customPath);
-        if (!dir.existsSync()) {
-          dir.createSync(recursive: true);
-        }
-        return dir;
+        base = Directory(customPath);
+        break;
       default:
-        return await _cacheDir();
+        base = await _cacheDir();
+        break;
     }
+    if (!base.existsSync()) {
+      base.createSync(recursive: true);
+    }
+    final temp = Directory('${base.path}/temp');
+    if (!temp.existsSync()) {
+      temp.createSync(recursive: true);
+    }
+    return temp;
   }
 
   Future<String> _downloadInto(
@@ -290,11 +304,12 @@ class WebdavService {
     }
   }
 
-  /// 按缓存上限清理：缓存总大小超过 limitMb 时，删除最早下载的文件。
-  /// （只清理缓存目录，不影响文档目录里持久保存的文件）
-  Future<void> cleanupCache(int limitMb) async {
+  /// 按缓存上限清理 temp 缓存区：总大小超过 limitMb 时删除最早的文件。
+  /// 只清理"保存位置目录/temp"，不影响保存位置根目录里的其他文件。
+  Future<void> cleanupCache(int limitMb,
+      {int location = StorageService.saveLocationCache, String? customPath}) async {
     try {
-      final dir = await _cacheDir();
+      final dir = await _resolveTempDir(location, customPath);
       final files = dir
           .listSync()
           .whereType<File>()
