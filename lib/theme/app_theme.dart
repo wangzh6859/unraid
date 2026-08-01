@@ -7,6 +7,8 @@ enum ThemePreset {
   darkTeal('深色 · 青绿', Brightness.dark, Color(0xFF14B8A6)),
   darkBlue('深色 · 蓝', Brightness.dark, Color(0xFF4C8DFF)),
   lightOrange('浅色 · 橙', Brightness.light, Color(0xFFE8630C)),
+  lightTeal('浅色 · 青绿', Brightness.light, Color(0xFF0E9488)),
+  lightBlue('浅色 · 蓝', Brightness.light, Color(0xFF2563EB)),
   system('跟随系统 · 橙', null, Color(0xFFF77E1C));
 
   final String label;
@@ -184,6 +186,11 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         backgroundColor: AppColors.surfaceElevated,
         behavior: SnackBarBehavior.floating,
+        // 显式指定文字颜色：浅色主题下默认样式会是白字，看不清
+        contentTextStyle: TextStyle(
+          color: AppColors.textPrimary,
+          fontSize: 13.5,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
