@@ -13,7 +13,6 @@ class SystemInfoSnapshot {
   final List<double> cpuPackageTemps; // °C，每个物理封装一个
 
   final List<NetworkInterfaceInfo> networkInterfaces;
-  final List<GpuInfo> gpu;
 
   SystemInfoSnapshot({
     required this.hostname,
@@ -26,7 +25,6 @@ class SystemInfoSnapshot {
     required this.cpuSpeedGhz,
     required this.cpuPackageTemps,
     required this.networkInterfaces,
-    required this.gpu,
   });
 
   factory SystemInfoSnapshot.fromJson(Map<String, dynamic> json) {
@@ -36,7 +34,6 @@ class SystemInfoSnapshot {
     final packages = cpu['packages'] ?? {};
     final devices = info['devices'] ?? {};
     final netList = (devices['network'] as List?) ?? [];
-    final gpuList = (devices['gpu'] as List?) ?? [];
 
     return SystemInfoSnapshot(
       hostname: os['hostname'] ?? '未知主机',
@@ -53,9 +50,6 @@ class SystemInfoSnapshot {
           .toList(),
       networkInterfaces: netList
           .map((n) => NetworkInterfaceInfo.fromJson(n as Map<String, dynamic>))
-          .toList(),
-      gpu: gpuList
-          .map((g) => GpuInfo.fromJson(g as Map<String, dynamic>))
           .toList(),
     );
   }
