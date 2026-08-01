@@ -46,8 +46,8 @@ class _DiskDetailScreenState extends State<DiskDetailScreen> {
         username: creds.username,
         password: creds.password,
       );
-      final device = widget.disk.device.replaceAll('/dev/', '');
-      final attrs = await session.fetchSmartAttributes(device);
+      // 用阵列磁盘名（如 disk1）访问 dynamix 磁盘页
+      final attrs = await session.fetchSmartAttributes(widget.disk.name);
       if (!mounted) return;
       setState(() {
         _smart = attrs.isEmpty ? null : attrs;
