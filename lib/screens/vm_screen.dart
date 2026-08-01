@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/vm_domain.dart';
 import '../services/unraid_api.dart';
@@ -17,11 +19,33 @@ class _VmScreenState extends State<VmScreen> {
   bool _loading = true;
   String? _error;
   final Set<String> _busyIds = {};
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // 前台每 2 秒静默刷新虚拟机状态
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _silentRefresh());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  /// 静默刷新：失败保留旧数据，不打扰用户
+  Future<void> _silentRefresh() async {
+    if (_loading) return;
+    try {
+      final list = await widget.api.fetchVms();
+      if (!mounted) return;
+      setState(() {
+        _vms = list;
+        _error = null;
+      });
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -78,11 +102,11 @@ class _VmScreenState extends State<VmScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.textFaint),
+              Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.textFaint),
               const SizedBox(height: 12),
               Text(_error!,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.textSecondary)),
+                  style: TextStyle(color: AppColors.textSecondary)),
               const SizedBox(height: 16),
               ElevatedButton(onPressed: _load, child: const Text('重试')),
             ],
@@ -92,7 +116,7 @@ class _VmScreenState extends State<VmScreen> {
     }
 
     if (_vms.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -118,7 +142,7 @@ class _VmScreenState extends State<VmScreen> {
             padding: const EdgeInsets.only(bottom: 14),
             child: Text(
               '共 ${_vms.length} 台虚拟机 · $running 台运行中',
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
           ),
           ..._vms.map((vm) => VmTile(
