@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/docker_container.dart';
 import '../services/unraid_api.dart';
@@ -17,11 +19,34 @@ class _DockerScreenState extends State<DockerScreen> {
   bool _loading = true;
   String? _error;
   final Set<String> _busyIds = {};
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // 前台每 2 秒静默刷新容器状态
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _silentRefresh());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  /// 静默刷新：失败保留旧数据，不打扰用户
+  Future<void> _silentRefresh() async {
+    if (_loading) return;
+    try {
+      final list = await widget.api.fetchContainers();
+      if (!mounted) return;
+      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      setState(() {
+        _containers = list;
+        _error = null;
+      });
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -81,12 +106,12 @@ class _DockerScreenState extends State<DockerScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_rounded,
+              Icon(Icons.cloud_off_rounded,
                   size: 48, color: AppColors.textFaint),
               const SizedBox(height: 12),
               Text(_error!,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.textSecondary)),
+                  style: TextStyle(color: AppColors.textSecondary)),
               const SizedBox(height: 16),
               ElevatedButton(onPressed: _load, child: const Text('重试')),
             ],
@@ -96,7 +121,7 @@ class _DockerScreenState extends State<DockerScreen> {
     }
 
     if (_containers.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -122,7 +147,7 @@ class _DockerScreenState extends State<DockerScreen> {
             padding: const EdgeInsets.only(bottom: 14),
             child: Text(
               '共 ${_containers.length} 个容器 · $running 个运行中',
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
           ),
           ..._containers.map((c) => ContainerTile(
