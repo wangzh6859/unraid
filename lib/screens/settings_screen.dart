@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../services/storage_service.dart';
@@ -38,6 +39,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _cacheLimitMb = 500;
   int _themePresetIndex = 0;
   int _saveLocation = StorageService.saveLocationCache;
+  String? _saveLocationPath;
 
   bool _loading = true;
   bool _probing = false;
@@ -69,6 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final cacheMb = await _storage.loadCacheLimitMb();
     final themeIdx = await _storage.loadThemePresetIndex();
     final saveLoc = await _storage.loadSaveLocation();
+    final saveLocPath = await _storage.loadSaveLocationPath();
     final wg = await _storage.loadWebgui();
     if (!mounted) return;
 
@@ -95,6 +98,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _cacheLimitMb = cacheMb.toDouble();
       _themePresetIndex = themeIdx;
       _saveLocation = saveLoc;
+      _saveLocationPath = saveLocPath;
       _loading = false;
     });
   }
@@ -313,8 +317,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _onSaveLocationChanged(int location) async {
-    setState(() => _saveLocation = location);
-    await _storage.saveSaveLocation(location);
+    if (location == StorageService.saveLocationCustom) {
+      // 手动选择目录（走系统目录选择器）
+      final picked = await FilePicker.platform.getDirectoryPath();
+      if (picked == null || picked.isEmpty) return; // 用户取消
+      setState(() {
+        _saveLocation = location;
+        _saveLocationPath = picked;
+      });
+      await _storage.saveSaveLocation(location);
+      await _storage.saveSaveLocationPath(picked);
+      _toast('已选择：$picked');
+    } else {
+      setState(() => _saveLocation = location);
+      await _storage.saveSaveLocation(location);
+    }
   }
 
   Future<void> _onCacheChanged(double value) async {
@@ -698,6 +715,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             activeColor: AppColors.orange,
             title: const Text('文档目录（持久保存，不参与清理）', style: TextStyle(fontSize: 14)),
             value: StorageService.saveLocationDocuments,
+            groupValue: _saveLocation,
+            onChanged: (v) {
+              if (v != null) _onSaveLocationChanged(v);
+            },
+          ),
+          RadioListTile<int>(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            activeColor: AppColors.orange,
+            title: const Text('自定义目录（手动选择）', style: TextStyle(fontSize: 14)),
+            subtitle: _saveLocationPath == null
+                ? null
+                : Text(_saveLocationPath!,
+                    style: TextStyle(
+                        fontSize: 11, color: AppColors.textFaint),
+                    overflow: TextOverflow.ellipsis),
+            value: StorageService.saveLocationCustom,
             groupValue: _saveLocation,
             onChanged: (v) {
               if (v != null) _onSaveLocationChanged(v);
