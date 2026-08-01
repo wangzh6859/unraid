@@ -160,13 +160,13 @@ class UnraidApi {
     return SystemInfoSnapshot.fromJson(data);
   }
 
-  /// GPU 静态信息（独立查询：某些版本 type 字段返回 null 会导致整个查询失败）
+  /// GPU 静态信息（独立查询，只查可空字段：某些版本 type 返回 null 会报错）
   Future<List<GpuInfo>> fetchGpus() async {
     const query = r'''
       query Gpus {
         info {
           devices {
-            gpu { type vendorname productid }
+            gpu { vendorname productid }
           }
         }
       }
