@@ -460,37 +460,50 @@ class _FileBrowserState extends State<_FileBrowser> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Stack(
       children: [
-        // 路径导航条（替代原来的内嵌 AppBar）
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-          child: Row(
-            children: [
-              if (!_atRoot)
-                IconButton(
-                  icon: const Icon(Icons.arrow_upward_rounded),
-                  onPressed: _goUp,
-                  tooltip: '返回上级',
-                )
-              else
-                IconButton(
-                  icon: const Icon(Icons.logout_rounded),
-                  onPressed: widget.onLogout,
-                  tooltip: '退出登录',
-                ),
-              Expanded(
-                child: Text(
-                  _atRoot ? '/' : _path,
-                  style: const TextStyle(
-                      color: AppColors.textSecondary, fontSize: 12.5),
-                  overflow: TextOverflow.ellipsis,
-                ),
+        Column(
+          children: [
+            // 路径导航条（替代原来的内嵌 AppBar）
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+              child: Row(
+                children: [
+                  if (!_atRoot)
+                    IconButton(
+                      icon: const Icon(Icons.arrow_upward_rounded),
+                      onPressed: _goUp,
+                      tooltip: '返回上级',
+                    )
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.logout_rounded),
+                      onPressed: widget.onLogout,
+                      tooltip: '退出登录',
+                    ),
+                  Expanded(
+                    child: Text(
+                      _atRoot ? '/' : _path,
+                      style: const TextStyle(
+                          color: AppColors.textSecondary, fontSize: 12.5),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
+            Expanded(child: _buildBody()),
+          ],
+        ),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: FloatingActionButton(
+            onPressed: _showFabs,
+            backgroundColor: AppColors.orange,
+            child: const Icon(Icons.add_rounded, color: Colors.black),
           ),
         ),
-        Expanded(child: _buildBody()),
       ],
     );
   }
