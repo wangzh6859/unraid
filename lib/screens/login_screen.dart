@@ -133,7 +133,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     color: Colors.black, size: 32),
               ),
               const SizedBox(height: 24),
-              const Text(
+              Text(
                 '连接你的 Unraid',
                 style: TextStyle(
                   fontSize: 28,
@@ -142,13 +142,13 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 '在 Unraid WebGUI 的 设置 → Management Access → API Keys 中生成密钥。'
                 '\n可填写多个地址（局域网、外网 HTTPS 都行），App 会自动选择当前可达的。',
                 style: TextStyle(color: AppColors.textSecondary, height: 1.5),
               ),
               const SizedBox(height: 24),
-              const Text(
+              Text(
                 '服务器地址',
                 style: TextStyle(
                   color: AppColors.textSecondary,
@@ -234,7 +234,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 '提示：地址不用带 https:// 或 http:// 前缀，App 会自动补全；'
                 '按优先级排序，局域网地址放在最上面会优先使用。',
                 style: TextStyle(color: AppColors.textFaint, fontSize: 12, height: 1.5),
