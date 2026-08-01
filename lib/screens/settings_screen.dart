@@ -4,11 +4,12 @@ import '../services/storage_service.dart';
 import '../services/unraid_api.dart';
 import '../services/webdav_service.dart';
 import '../theme/app_theme.dart';
-import 'login_screen.dart';
 
-/// 设置页：
-/// - 服务器连接：查看地址列表、重新探测、编辑连接、断开连接
+/// 设置页（所有登录/连接配置都集中在这里，改动保存后实时生效）：
+/// - 服务器连接：地址列表编辑 + API Key + 保存并应用 / 重新探测 / 断开连接
 /// - WebDAV 文件管理：OpenList 地址（自动补 /dav）/ 账号 / 密码
+/// - 主题：深色/浅色/跟随系统 × 强调色
+/// - 下载保存位置：缓存目录（自动清理）/ 文档目录（持久保存）
 /// - 文件缓存上限
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -21,15 +22,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _storage = StorageService();
 
   ConnectionInfo? _connection;
+  final List<TextEditingController> _addressControllers = [
+    TextEditingController(),
+  ];
+  final _apiKeyController = TextEditingController();
 
   final _webdavUrlController = TextEditingController();
   final _webdavUserController = TextEditingController();
   final _webdavPassController = TextEditingController();
 
   double _cacheLimitMb = 500;
+  int _themePresetIndex = 0;
+  int _saveLocation = StorageService.saveLocationCache;
+
   bool _loading = true;
-  bool _webdavBusy = false;
   bool _probing = false;
+  bool _savingConnection = false;
+  bool _webdavBusy = false;
 
   @override
   void initState() {
@@ -39,6 +48,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    for (final c in _addressControllers) {
+      c.dispose();
+    }
+    _apiKeyController.dispose();
     _webdavUrlController.dispose();
     _webdavUserController.dispose();
     _webdavPassController.dispose();
@@ -49,40 +62,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final conn = await _storage.loadConnection();
     final webdav = await _storage.loadWebdav();
     final cacheMb = await _storage.loadCacheLimitMb();
+    final themeIdx = await _storage.loadThemePresetIndex();
+    final saveLoc = await _storage.loadSaveLocation();
     if (!mounted) return;
+
     setState(() {
       _connection = conn;
+      if (conn != null) {
+        _apiKeyController.text = conn.apiKey;
+        for (var i = 0; i < conn.addresses.length; i++) {
+          if (i < _addressControllers.length) {
+            _addressControllers[i].text = conn.addresses[i];
+          } else {
+            _addressControllers.add(TextEditingController(text: conn.addresses[i]));
+          }
+        }
+      }
       if (webdav != null) {
         _webdavUrlController.text = webdav.url;
         _webdavUserController.text = webdav.username;
         _webdavPassController.text = webdav.password;
       }
       _cacheLimitMb = cacheMb.toDouble();
+      _themePresetIndex = themeIdx;
+      _saveLocation = saveLoc;
       _loading = false;
     });
   }
 
   // -------------------- 服务器连接 --------------------
 
-  Future<void> _reprobe() async {
-    final conn = _connection;
-    if (conn == null) return;
-    setState(() => _probing = true);
-    final best = await UnraidApi.probeBestAddress(conn.addresses, conn.apiKey);
-    if (!mounted) return;
-    setState(() => _probing = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(
-        best != null ? '连接正常，当前使用：$best' : '所有地址均无法连接，请检查网络或地址配置',
-      ),
-    ));
+  void _addAddressField() {
+    setState(() => _addressControllers.add(TextEditingController()));
   }
 
-  Future<void> _editConnection() async {
-    // 登录页连接成功后会重建整个页面栈（新的 HomeScreen），设置页随之关闭
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-    );
+  void _removeAddressField(int index) {
+    if (_addressControllers.length <= 1) return;
+    setState(() {
+      _addressControllers[index].dispose();
+      _addressControllers.removeAt(index);
+    });
+  }
+
+  List<String> get _enteredAddresses => _addressControllers
+      .map((c) => c.text.trim())
+      .where((s) => s.isNotEmpty)
+      .map(UnraidApi.normalizeAddress)
+      .toList();
+
+  Future<void> _saveAndApplyConnection() async {
+    final apiKey = _apiKeyController.text.trim();
+    final addresses = _enteredAddresses;
+    if (addresses.isEmpty || apiKey.isEmpty) {
+      _toast('请至少填写一个服务器地址和 API Key');
+      return;
+    }
+
+    setState(() => _savingConnection = true);
+    // 保存并当场探测，确认当前可用地址
+    final best = await UnraidApi.probeBestAddress(addresses, apiKey);
+    if (!mounted) return;
+    setState(() => _savingConnection = false);
+
+    if (best == null) {
+      _toast('所有地址都无法连接，仍已保存配置；回到主页会显示具体错误');
+    } else {
+      _toast('连接正常，当前使用：$best');
+    }
+    await _storage.saveConnection(apiKey: apiKey, addresses: addresses);
+  }
+
+  Future<void> _reprobe() async {
+    final apiKey = _apiKeyController.text.trim();
+    final addresses = _enteredAddresses;
+    if (addresses.isEmpty || apiKey.isEmpty) {
+      _toast('请先填写地址和 API Key');
+      return;
+    }
+    setState(() => _probing = true);
+    final best = await UnraidApi.probeBestAddress(addresses, apiKey);
+    if (!mounted) return;
+    setState(() => _probing = false);
+    _toast(best != null ? '连接正常，当前使用：$best' : '所有地址均无法连接，请检查网络或地址配置');
   }
 
   Future<void> _disconnect() async {
@@ -118,14 +179,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _webdavBusy = true);
     try {
       await WebdavService(creds).testConnection();
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('连接成功')));
-      }
+      if (mounted) _toast('连接成功');
     } on WebdavException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
+      if (mounted) _toast(e.message);
     } finally {
       if (mounted) setState(() => _webdavBusy = false);
     }
@@ -138,14 +194,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       await WebdavService(creds).testConnection();
       await _storage.saveWebdav(creds);
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('已保存')));
-      }
+      if (mounted) _toast('已保存');
     } on WebdavException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
+      if (mounted) _toast(e.message);
     } finally {
       if (mounted) setState(() => _webdavBusy = false);
     }
@@ -180,8 +231,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   WebdavCredentials? _readWebdavForm() {
     final url = _webdavUrlController.text.trim();
     if (url.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请填写 WebDAV 地址')));
+      _toast('请填写 WebDAV 地址');
       return null;
     }
     return WebdavCredentials(
@@ -191,11 +241,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // -------------------- 缓存上限 --------------------
+  // -------------------- 主题 / 保存位置 / 缓存 --------------------
+
+  Future<void> _onThemeChanged(int index) async {
+    setState(() => _themePresetIndex = index);
+    await _storage.saveThemePresetIndex(index);
+    ThemeController.apply(ThemePreset.fromIndex(index)); // 立即生效
+  }
+
+  Future<void> _onSaveLocationChanged(int location) async {
+    setState(() => _saveLocation = location);
+    await _storage.saveSaveLocation(location);
+  }
 
   Future<void> _onCacheChanged(double value) async {
     setState(() => _cacheLimitMb = value);
     await _storage.saveCacheLimitMb(value.round());
+  }
+
+  // -------------------- 工具 --------------------
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 统一尺寸的操作按钮：高度 44、图标 18、文字 13，避免页面内按钮大小不一
+  Widget _actionButton({
+    required IconData icon,
+    required String label,
+    VoidCallback? onPressed,
+    Color? color,
+    bool busy = false,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: busy ? null : onPressed,
+      icon: busy
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(icon, size: 18),
+      label: Text(label, style: const TextStyle(fontSize: 13)),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: color,
+        minimumSize: const Size(0, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+      ),
+    );
   }
 
   // -------------------- UI --------------------
@@ -213,12 +308,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 16),
                 _buildWebdavCard(),
                 const SizedBox(height: 16),
+                _buildThemeCard(),
+                const SizedBox(height: 16),
+                _buildSaveLocationCard(),
+                const SizedBox(height: 16),
                 _buildCacheCard(),
                 const SizedBox(height: 16),
-                const Padding(
+                Padding(
                   padding: EdgeInsets.symmetric(horizontal: 4),
                   child: Text(
-                    '提示：服务器地址和 WebDAV 地址相互独立，可以指向不同的主机/端口。',
+                    '提示：服务器地址和 WebDAV 地址相互独立，可以指向不同的主机/端口；'
+                    '所有配置改动在保存后立即生效，无需重启 App。',
                     style: TextStyle(fontSize: 12, color: AppColors.textFaint, height: 1.5),
                   ),
                 ),
@@ -227,8 +327,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _buildSectionTitle(IconData icon, String title) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppColors.textSecondary),
+        const SizedBox(width: 8),
+        Text(title,
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+      ],
+    );
+  }
+
   Widget _buildConnectionCard() {
-    final conn = _connection;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -239,70 +350,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
-            children: [
-              Icon(Icons.dns_rounded, size: 18, color: AppColors.textSecondary),
-              SizedBox(width: 8),
-              Text('服务器连接',
-                  style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (conn == null || conn.addresses.isEmpty)
-            const Text('未配置连接',
-                style: TextStyle(color: AppColors.textFaint, fontSize: 13))
-          else
-            ...conn.addresses.map((addr) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.circle, size: 7, color: AppColors.orange),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(addr,
-                            style: const TextStyle(
-                                color: AppColors.textPrimary, fontSize: 13),
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                    ],
+          _buildSectionTitle(Icons.dns_rounded, '服务器连接'),
+          const SizedBox(height: 6),
+          Text('可填写多个地址（局域网、外网 HTTPS 都行），App 启动时自动选择当前可达的。',
+              style: TextStyle(color: AppColors.textFaint, fontSize: 12, height: 1.5)),
+          const SizedBox(height: 14),
+          for (var i = 0; i < _addressControllers.length; i++) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _addressControllers[i],
+                    decoration: InputDecoration(
+                      hintText: i == 0 ? '例如 192.168.1.10 或 nas.example.com' : '备用地址 ${i + 1}',
+                      prefixIcon: const Icon(Icons.router_rounded),
+                      suffixIcon: i == 0
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                              onPressed: () => _removeAddressField(i),
+                              tooltip: '移除该地址',
+                            ),
+                    ),
+                    keyboardType: TextInputType.url,
                   ),
-                )),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _addAddressField,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('添加备用地址'),
+            ),
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _apiKeyController,
+            decoration: const InputDecoration(
+              labelText: 'API Key',
+              prefixIcon: Icon(Icons.vpn_key_rounded),
+            ),
+            obscureText: true,
+          ),
           const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _probing ? null : _reprobe,
-                  icon: _probing
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.wifi_tethering_rounded, size: 18),
-                  label: const Text('重新探测'),
+                child: _actionButton(
+                  icon: Icons.save_rounded,
+                  label: '保存并应用',
+                  busy: _savingConnection,
+                  onPressed: _saveAndApplyConnection,
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _editConnection,
-                  icon: const Icon(Icons.edit_rounded, size: 18),
-                  label: const Text('编辑'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _disconnect,
-                  style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.red),
-                  icon: const Icon(Icons.link_off_rounded, size: 18),
-                  label: const Text('断开'),
+                child: _actionButton(
+                  icon: Icons.wifi_tethering_rounded,
+                  label: '重新探测',
+                  busy: _probing,
+                  onPressed: _reprobe,
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: _actionButton(
+              icon: Icons.link_off_rounded,
+              label: '断开连接（清除所有配置）',
+              color: AppColors.red,
+              onPressed: _disconnect,
+            ),
           ),
         ],
       ),
@@ -320,17 +444,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
-            children: [
-              Icon(Icons.folder_rounded, size: 18, color: AppColors.textSecondary),
-              SizedBox(width: 8),
-              Text('WebDAV 文件管理',
-                  style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            ],
-          ),
+          _buildSectionTitle(Icons.folder_rounded, 'WebDAV 文件管理'),
           const SizedBox(height: 6),
-          const Text('OpenList 或其他 WebDAV 服务。地址只填主页地址即可，/dav 会自动补全。',
+          Text('OpenList 或其他 WebDAV 服务。地址只填主页地址即可，/dav 会自动补全。',
               style: TextStyle(color: AppColors.textFaint, fontSize: 12, height: 1.5)),
           const SizedBox(height: 14),
           TextField(
@@ -363,31 +479,103 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _webdavBusy ? null : _testWebdav,
-                  icon: const Icon(Icons.network_check_rounded, size: 18),
-                  label: const Text('测试'),
+                child: _actionButton(
+                  icon: Icons.network_check_rounded,
+                  label: '测试',
+                  busy: _webdavBusy,
+                  onPressed: _testWebdav,
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _webdavBusy ? null : _saveWebdav,
-                  icon: const Icon(Icons.save_rounded, size: 18),
-                  label: const Text('保存'),
+                child: _actionButton(
+                  icon: Icons.save_rounded,
+                  label: '保存',
+                  busy: _webdavBusy,
+                  onPressed: _saveWebdav,
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: OutlinedButton.icon(
+                child: _actionButton(
+                  icon: Icons.delete_sweep_rounded,
+                  label: '清除',
+                  color: AppColors.red,
                   onPressed: _clearWebdav,
-                  style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.red),
-                  icon: const Icon(Icons.delete_sweep_rounded, size: 18),
-                  label: const Text('清除'),
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThemeCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionTitle(Icons.palette_rounded, '主题'),
+          const SizedBox(height: 4),
+          for (var i = 0; i < ThemePreset.values.length; i++)
+            RadioListTile<int>(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              activeColor: AppColors.orange,
+              title: Text(ThemePreset.values[i].label,
+                  style: const TextStyle(fontSize: 14)),
+              value: i,
+              groupValue: _themePresetIndex,
+              onChanged: (v) {
+                if (v != null) _onThemeChanged(v);
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSaveLocationCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionTitle(Icons.save_rounded, '下载保存位置'),
+          const SizedBox(height: 4),
+          RadioListTile<int>(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            activeColor: AppColors.orange,
+            title: const Text('缓存目录（默认，超限自动清理）', style: TextStyle(fontSize: 14)),
+            value: StorageService.saveLocationCache,
+            groupValue: _saveLocation,
+            onChanged: (v) {
+              if (v != null) _onSaveLocationChanged(v);
+            },
+          ),
+          RadioListTile<int>(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            activeColor: AppColors.orange,
+            title: const Text('文档目录（持久保存，不参与清理）', style: TextStyle(fontSize: 14)),
+            value: StorageService.saveLocationDocuments,
+            groupValue: _saveLocation,
+            onChanged: (v) {
+              if (v != null) _onSaveLocationChanged(v);
+            },
           ),
         ],
       ),
@@ -405,37 +593,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildSectionTitle(Icons.sd_storage_rounded, '文件缓存上限'),
+          const SizedBox(height: 6),
           Row(
             children: [
-              const Icon(Icons.sd_storage_rounded,
-                  size: 18, color: AppColors.textSecondary),
-              const SizedBox(width: 8),
-              const Text(
-                '文件缓存上限',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
+              Expanded(
+                child: Text('超过上限后会自动清理最早的缓存文件。',
+                    style: TextStyle(
+                        fontSize: 12.5, color: AppColors.textFaint, height: 1.5)),
               ),
-              const Spacer(),
               Text(
                 _cacheLimitMb >= 1000
                     ? '${(_cacheLimitMb / 1000).toStringAsFixed(1)} GB'
                     : '${_cacheLimitMb.round()} MB',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                   color: AppColors.orange,
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            '文件管理里下载/预览过的文件会缓存在本地，超过这个上限后会自动清理最早的缓存。拖动滑块实时生效。',
-            style: TextStyle(
-                fontSize: 12.5, color: AppColors.textFaint, height: 1.5),
           ),
           const SizedBox(height: 12),
           SliderTheme(
@@ -453,7 +630,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: _onCacheChanged,
             ),
           ),
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('50 MB',
