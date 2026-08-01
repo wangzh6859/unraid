@@ -13,6 +13,7 @@ class SystemInfoSnapshot {
   final List<double> cpuPackageTemps; // °C，每个物理封装一个
 
   final List<NetworkInterfaceInfo> networkInterfaces;
+  final List<GpuInfo> gpu;
 
   SystemInfoSnapshot({
     required this.hostname,
@@ -25,6 +26,7 @@ class SystemInfoSnapshot {
     required this.cpuSpeedGhz,
     required this.cpuPackageTemps,
     required this.networkInterfaces,
+    required this.gpu,
   });
 
   factory SystemInfoSnapshot.fromJson(Map<String, dynamic> json) {
@@ -34,6 +36,7 @@ class SystemInfoSnapshot {
     final packages = cpu['packages'] ?? {};
     final devices = info['devices'] ?? {};
     final netList = (devices['network'] as List?) ?? [];
+    final gpuList = (devices['gpu'] as List?) ?? [];
 
     return SystemInfoSnapshot(
       hostname: os['hostname'] ?? '未知主机',
@@ -50,6 +53,9 @@ class SystemInfoSnapshot {
           .toList(),
       networkInterfaces: netList
           .map((n) => NetworkInterfaceInfo.fromJson(n as Map<String, dynamic>))
+          .toList(),
+      gpu: gpuList
+          .map((g) => GpuInfo.fromJson(g as Map<String, dynamic>))
           .toList(),
     );
   }
@@ -370,4 +376,76 @@ class NetworkInterfaceInfo {
 
   /// 官方 API 这里只暴露网卡协商链路速度（比如 "1000"），不是实时占用率
   String get speedLabel => (speed != null && speed!.isNotEmpty) ? '$speed Mbps' : '未知带宽';
+}
+
+/// GPU 静态信息（PCI 设备），对应 info.devices.gpu
+class GpuInfo {
+  final String type;
+  final String? vendorname;
+  final String? productid;
+
+  GpuInfo({required this.type, this.vendorname, this.productid});
+
+  factory GpuInfo.fromJson(Map<String, dynamic> json) {
+    return GpuInfo(
+      type: json['type'] ?? '',
+      vendorname: json['vendorname'],
+      productid: json['productid'],
+    );
+  }
+
+  String get label {
+    if (vendorname != null && vendorname!.isNotEmpty) {
+      return vendorname!;
+    }
+    return type.isNotEmpty ? type : '未知 GPU';
+  }
+}
+
+/// 温度传感器（lm-sensors / smartctl / ipmi），对应 metrics.temperature.sensors
+class TemperatureSensor {
+  final String name;
+  final String type; // CPU_PACKAGE / CPU_CORE / GPU / DISK / NVME / MOTHERBOARD ...
+  final double valueCelsius;
+  final String status; // NORMAL / WARNING / CRITICAL / UNKNOWN
+
+  TemperatureSensor({
+    required this.name,
+    required this.type,
+    required this.valueCelsius,
+    required this.status,
+  });
+
+  factory TemperatureSensor.fromJson(Map<String, dynamic> json) {
+    final current = json['current'] ?? {};
+    return TemperatureSensor(
+      name: json['name'] ?? '',
+      type: json['type'] ?? '',
+      valueCelsius: _toCelsius(
+        _toDouble(current['value']),
+        (current['unit'] ?? 'CELSIUS').toString(),
+      ),
+      status: (current['status'] ?? 'UNKNOWN').toString(),
+    );
+  }
+
+  static double _toCelsius(double value, String unit) {
+    switch (unit) {
+      case 'FAHRENHEIT':
+        return (value - 32) * 5 / 9;
+      case 'KELVIN':
+        return value - 273.15;
+      case 'RANKINE':
+        return (value - 491.67) * 5 / 9;
+      default:
+        return value;
+    }
+  }
+
+  static double _toDouble(dynamic v) {
+    if (v == null) return 0;
+    if (v is double) return v;
+    if (v is int) return v.toDouble();
+    return double.tryParse('$v') ?? 0;
+  }
 }
