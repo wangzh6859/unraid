@@ -47,18 +47,12 @@ class _DiskDetailScreenState extends State<DiskDetailScreen> {
         password: creds.password,
       );
       final device = widget.disk.device.replaceAll('/dev/', '');
-      final html = await session.fetchSmartPage(device);
-      final attrs = parseSmartAttributes(html);
+      final attrs = await session.fetchSmartAttributes(device);
       if (!mounted) return;
       setState(() {
         _smart = attrs.isEmpty ? null : attrs;
         if (attrs.isEmpty) {
-          final preview = html
-              .replaceAll(RegExp(r'<[^>]+>'), ' ')
-              .replaceAll(RegExp(r'\s+'), ' ')
-              .trim();
-          _smartError = 'SMART 页面格式无法解析。页面内容预览：'
-              '${preview.length > 160 ? preview.substring(0, 160) : preview}';
+          _smartError = 'SMART 页面格式无法解析：未找到属性数据';
         }
         _smartLoading = false;
       });
