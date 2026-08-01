@@ -44,7 +44,7 @@ class UsageRing extends StatelessWidget {
                   children: [
                     Text(
                       '${clamped.toStringAsFixed(0)}%',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
@@ -57,7 +57,7 @@ class UsageRing extends StatelessWidget {
                           centerLabel,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 10, color: AppColors.textFaint),
+                          style: TextStyle(fontSize: 10, color: AppColors.textFaint),
                         ),
                       ),
                   ],
@@ -69,7 +69,7 @@ class UsageRing extends StatelessWidget {
         const SizedBox(height: 8),
         Text(label,
             style:
-                const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                TextStyle(fontSize: 13, color: AppColors.textSecondary)),
       ],
     );
   }
