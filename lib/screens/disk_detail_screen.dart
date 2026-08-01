@@ -52,7 +52,14 @@ class _DiskDetailScreenState extends State<DiskDetailScreen> {
       if (!mounted) return;
       setState(() {
         _smart = attrs.isEmpty ? null : attrs;
-        if (attrs.isEmpty) _smartError = 'SMART 页面格式无法解析（请确认 webGUI 磁盘 SMART 页面地址）';
+        if (attrs.isEmpty) {
+          final preview = html
+              .replaceAll(RegExp(r'<[^>]+>'), ' ')
+              .replaceAll(RegExp(r'\s+'), ' ')
+              .trim();
+          _smartError = 'SMART 页面格式无法解析。页面内容预览：'
+              '${preview.length > 160 ? preview.substring(0, 160) : preview}';
+        }
         _smartLoading = false;
       });
     } catch (e) {
