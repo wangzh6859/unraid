@@ -217,7 +217,7 @@ class WebdavService {
     }
   }
 
-  // -------------------- 本地缓存（下载后交给系统应用打开/预览）--------------------
+  // -------------------- 本地保存（下载后交给系统应用打开/预览）--------------------
 
   static Future<Directory> _cacheDir() async {
     final base = await getApplicationCacheDirectory();
@@ -228,14 +228,26 @@ class WebdavService {
     return dir;
   }
 
-  /// 下载文件到本地缓存目录，返回本地路径（供系统应用打开）。
-  Future<String> downloadToCache(
+  static Future<Directory> _documentsDir() async {
+    final base = await getApplicationDocumentsDirectory();
+    final dir = Directory('${base.path}/下载');
+    if (!dir.existsSync()) {
+      dir.createSync(recursive: true);
+    }
+    return dir;
+  }
+
+  /// 下载文件到本地，返回本地路径（供系统应用打开）。
+  /// [persistent] 为 true 时保存到应用文档目录（持久保存，不受缓存清理影响）；
+  /// 为 false 时保存到应用缓存目录（默认，会被"缓存上限"自动清理）。
+  Future<String> downloadToLocal(
     String remotePath,
     String name, {
+    required bool persistent,
     void Function(double progress)? onProgress,
   }) async {
     try {
-      final dir = await _cacheDir();
+      final dir = persistent ? await _documentsDir() : await _cacheDir();
       final localPath = '${dir.path}/${_safeFileName(name)}';
       await downloadToFile(remotePath, localPath, onProgress: onProgress);
       return localPath;
@@ -245,6 +257,7 @@ class WebdavService {
   }
 
   /// 按缓存上限清理：缓存总大小超过 limitMb 时，删除最早下载的文件。
+  /// （只清理缓存目录，不影响文档目录里持久保存的文件）
   Future<void> cleanupCache(int limitMb) async {
     try {
       final dir = await _cacheDir();
