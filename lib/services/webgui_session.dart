@@ -133,19 +133,59 @@ class WebguiSession {
     }
   }
 
-  /// 抓取旧版 webGUI 的磁盘 SMART 页面原始内容。
-  /// 7.2.x 的页面路径以 /Main 开头；如果第一个路径不存在会自动尝试第二个。
-  Future<String> fetchSmartPage(String device) async {
+  /// 抓取磁盘 SMART 完整属性。
+  /// 策略：先试常见路径，再从返回的页面 HTML 里挖出 smart 相关的
+  /// 链接/端点（数据可能是 JS 异步加载的，端点在页面 JS 里），逐个尝试解析。
+  Future<List<SmartAttribute>> fetchSmartAttributes(String device) async {
     await _ensureLogin();
-    for (final path in ['/Main/Smart?device=$device', '/Main?device=$device']) {
-      final resp = await http
-          .get(_uri(path), headers: {'Cookie': _cookieHeader})
-          .timeout(const Duration(seconds: 15));
-      if (resp.statusCode == 200 && resp.body.isNotEmpty) {
-        return resp.body;
+    final tried = <String>{};
+    final candidates = <String>[
+      '/Main/Smart?device=$device',
+      '/Main?device=$device',
+      '/Main',
+    ];
+    while (candidates.isNotEmpty) {
+      final path = candidates.removeAt(0);
+      if (!tried.contains(path)) {
+        tried.add(path);
+      } else {
+        continue;
+      }
+      String body;
+      try {
+        final resp = await http
+            .get(_uri(path), headers: {'Cookie': _cookieHeader})
+            .timeout(const Duration(seconds: 15));
+        if (resp.statusCode != 200) continue;
+        body = resp.body;
+      } catch (_) {
+        continue;
+      }
+      final attrs = parseSmartAttributes(body);
+      if (attrs.isNotEmpty) return attrs;
+      // 从页面里挖 smart 相关端点，继续尝试
+      for (final f in _discoverEndpoints(body)) {
+        if (!tried.contains(f)) candidates.add(f);
       }
     }
-    throw WebguiSessionException('SMART 页面抓取失败：请确认 webGUI 磁盘 SMART 页面地址');
+    throw WebguiSessionException(
+        'SMART 页面格式无法解析：自动发现的端点都拿不到属性数据');
+  }
+
+  /// 从页面 HTML/JS 里挖出 smart 相关的路径端点
+  List<String> _discoverEndpoints(String html) {
+    final found = <String>{};
+    final re = RegExp(
+        r'''["']([^"']*[Ss]mart[^"']*)["']''');
+    for (final m in re.allMatches(html)) {
+      final raw = m.group(1)!;
+      final u = raw.contains('://') ? Uri.tryParse(raw)?.path ?? '' : raw;
+      if (u.isEmpty || u.startsWith('/webGui/images') || u.startsWith('/webGui/css')) {
+        continue;
+      }
+      found.add(u.startsWith('/') ? u : '/$u');
+    }
+    return found.toList();
   }
 
   /// 系统更新检测（旧版端点，json=true 返回可用更新信息）
