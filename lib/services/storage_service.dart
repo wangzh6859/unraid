@@ -30,6 +30,14 @@ class StorageService {
   static const _keyCacheLimitMb = 'cache_limit_mb';
   static const _defaultCacheLimitMb = 500;
 
+  // 主题预设索引（对应 ThemePreset.values 的顺序）
+  static const _keyThemePreset = 'theme_preset';
+
+  // 下载保存位置：0=应用缓存目录（默认，自动清理） 1=应用文档目录（持久保存）
+  static const _keySaveLocation = 'save_location';
+  static const int saveLocationCache = 0;
+  static const int saveLocationDocuments = 1;
+
   Future<void> saveConnection({
     required String apiKey,
     required List<String> addresses,
@@ -111,5 +119,29 @@ class StorageService {
   Future<void> saveCacheLimitMb(int mb) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyCacheLimitMb, mb);
+  }
+
+  // -------------------- 主题 --------------------
+
+  Future<int> loadThemePresetIndex() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyThemePreset) ?? 0;
+  }
+
+  Future<void> saveThemePresetIndex(int index) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyThemePreset, index);
+  }
+
+  // -------------------- 下载保存位置 --------------------
+
+  Future<int> loadSaveLocation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keySaveLocation) ?? saveLocationCache;
+  }
+
+  Future<void> saveSaveLocation(int location) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keySaveLocation, location);
   }
 }
