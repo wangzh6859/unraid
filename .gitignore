@@ -1,0 +1,25 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# Android 平台工程由 CI 自动生成，不需要提交到仓库
+# （generate-keystore.yml / build-apk.yml 会自动创建 android/ 目录）
+android/
+
+# 签名证书相关，绝对不要提交
+*.jks
+*.keystore
+key.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store
