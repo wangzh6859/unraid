@@ -247,7 +247,7 @@ class WebdavService {
     String? customPath,
     void Function(num count, num total)? onProgress,
   }) async {
-    final primary = _resolveDir(location, customPath);
+    final primary = await _resolveDir(location, customPath);
     try {
       return await _downloadInto(primary, remotePath, name, onProgress);
     } catch (_) {
