@@ -39,8 +39,10 @@ class StorageService {
 
   // 下载保存位置：0=应用缓存目录（默认，自动清理） 1=应用文档目录（持久保存）
   static const _keySaveLocation = 'save_location';
+  static const _keySaveLocationPath = 'save_location_path';
   static const int saveLocationCache = 0;
   static const int saveLocationDocuments = 1;
+  static const int saveLocationCustom = 2;
 
   Future<void> saveConnection({
     required String apiKey,
@@ -170,5 +172,15 @@ class StorageService {
   Future<void> saveSaveLocation(int location) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keySaveLocation, location);
+  }
+
+  Future<String?> loadSaveLocationPath() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keySaveLocationPath);
+  }
+
+  Future<void> saveSaveLocationPath(String path) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keySaveLocationPath, path);
   }
 }
