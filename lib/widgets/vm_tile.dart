@@ -82,7 +82,7 @@ class VmTile extends StatelessWidget {
               color: AppColors.surfaceElevated,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.dvr_rounded, color: AppColors.textSecondary),
+            child: Icon(Icons.dvr_rounded, color: AppColors.textSecondary),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -91,7 +91,7 @@ class VmTile extends StatelessWidget {
               children: [
                 Text(
                   vm.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
                     color: AppColors.textPrimary,
@@ -109,7 +109,7 @@ class VmTile extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                     Text(_stateLabel,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 12, color: AppColors.textSecondary)),
                   ],
                 ),
