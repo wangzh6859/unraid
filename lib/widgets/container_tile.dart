@@ -71,13 +71,13 @@ class ContainerTile extends StatelessWidget {
                     child: Image.network(
                       container.iconUrl!,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Icon(
+                      errorBuilder: (_, __, ___) => Icon(
                         Icons.widgets_rounded,
                         color: AppColors.textSecondary,
                       ),
                     ),
                   )
-                : const Icon(Icons.widgets_rounded,
+                : Icon(Icons.widgets_rounded,
                     color: AppColors.textSecondary),
           ),
           const SizedBox(width: 12),
@@ -87,7 +87,7 @@ class ContainerTile extends StatelessWidget {
               children: [
                 Text(
                   container.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
                     color: AppColors.textPrimary,
@@ -108,7 +108,7 @@ class ContainerTile extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       _stateLabel,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 12, color: AppColors.textSecondary),
                     ),
                   ],
