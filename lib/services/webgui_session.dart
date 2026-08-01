@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+import '../models/network_metrics.dart';
+
 /// 通过 Unraid webGUI 的账号密码会话访问旧版 PHP 端点。
 ///
 /// 官方 GraphQL API 没有提供的能力（整机重启/关机、SMART 明细、
@@ -134,17 +136,17 @@ class WebguiSession {
   }
 
   /// 抓取磁盘 SMART 完整属性。
-  /// 策略：先试常见路径，再从返回的页面 HTML 里挖出 smart 相关的
-  /// 链接/端点（数据可能是 JS 异步加载的，端点在页面 JS 里），逐个尝试解析。
-  Future<List<SmartAttribute>> fetchSmartAttributes(String device) async {
+  /// 7.2.x 的 dynamix 磁盘页路径为 /Dashboard/Main?name=<磁盘名>（如 disk1），
+  /// SMART 属性在 tab3（cookie: one=tab3），内容服务端渲染。
+  Future<List<SmartAttribute>> fetchSmartAttributes(String diskName) async {
     await _ensureLogin();
     final tried = <String>{};
     final candidates = <String>[
-      '/Main/Smart?device=$device',
-      '/Main?device=$device',
-      '/Main',
+      '/Dashboard/Main?name=$diskName',
+      '/Main?name=$diskName',
+      '/Dashboard/Main/Settings/Device?name=$diskName',
     ];
-    while (candidates.isNotEmpty) {
+    while (candidates.isNotEmpty && tried.length < 5) {
       final path = candidates.removeAt(0);
       if (!tried.contains(path)) {
         tried.add(path);
@@ -154,8 +156,14 @@ class WebguiSession {
       String body;
       try {
         final resp = await http
-            .get(_uri(path), headers: {'Cookie': _cookieHeader})
-            .timeout(const Duration(seconds: 15));
+            .get(
+              _uri(path),
+              headers: {
+                // one=tab3：SMART 属性页签（dynamix 按 cookie 渲染对应 tab）
+                'Cookie': 'one=tab3; $_cookieHeader',
+              },
+            )
+            .timeout(const Duration(seconds: 8));
         if (resp.statusCode != 200) continue;
         body = resp.body;
       } catch (_) {
@@ -186,6 +194,51 @@ class WebguiSession {
       found.add(u.startsWith('/') ? u : '/$u');
     }
     return found.toList();
+  }
+
+  /// 通过 nchan 频道抓取实时网络速率（仪表盘数据源）。
+  /// dynamix 仪表盘的网络面板订阅 /sub/update3，消息为 JSON，port 数组形如
+  /// [['eth0', '12.3 MB/s', '4.5 MB/s'], ...]（第 2/3 项是格式化字符串速率）。
+  /// nchan 支持 GET 长轮询，带会话 cookie 即可读取。
+  Future<List<NetworkRateInfo>> fetchNchanNetworkRates() async {
+    await _ensureLogin();
+    final resp = await http
+        .get(
+          _uri('/sub/update3?timeout=1'),
+          headers: {'Cookie': _cookieHeader},
+        )
+        .timeout(const Duration(seconds: 3));
+    if (resp.statusCode != 200 || resp.body.trim().isEmpty) {
+      throw WebguiSessionException('nchan 无数据');
+    }
+    final json = jsonDecode(resp.body) as Map<String, dynamic>;
+    final ports = (json['port'] as List?) ?? [];
+    final rates = <NetworkRateInfo>[];
+    for (final p in ports) {
+      final arr = p as List;
+      if (arr.isEmpty) continue;
+      rates.add(NetworkRateInfo(
+        name: arr[0].toString(),
+        operstate: null,
+        rxSec: _parseRateString(arr.length > 1 ? arr[1].toString() : ''),
+        txSec: _parseRateString(arr.length > 2 ? arr[2].toString() : ''),
+        utilizationPercent: null,
+        lastUpdated: DateTime.now(),
+      ));
+    }
+    if (rates.isEmpty) {
+      throw WebguiSessionException('nchan 无端口数据');
+    }
+    return rates;
+  }
+
+  /// 解析 "12.3 MB/s" / "456.7 kB/s" 这类格式化速率字符串 → 字节/秒
+  static double _parseRateString(String s) {
+    final m = RegExp(r'^([\d.]+)\s*([kMGTPE]?)(?:i)?B/s$').firstMatch(s.trim());
+    if (m == null) return 0;
+    final v = double.tryParse(m.group(1)!) ?? 0;
+    const mult = {'': 1.0, 'k': 1e3, 'M': 1e6, 'G': 1e9, 'T': 1e12, 'P': 1e15, 'E': 1e18};
+    return v * (mult[m.group(2)!] ?? 1);
   }
 
   /// 系统更新检测（旧版端点，json=true 返回可用更新信息）
