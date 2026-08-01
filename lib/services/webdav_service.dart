@@ -166,20 +166,18 @@ class WebdavService {
     }
   }
 
-  /// 下载到本地文件，onProgress 回调 0.0~1.0 的进度
+  /// 下载到本地文件，onProgress 回调原始字节进度 (已传字节, 总字节)
   Future<void> downloadToFile(
     String remotePath,
     String localPath, {
-    void Function(double progress)? onProgress,
+    void Function(num count, num total)? onProgress,
   }) async {
     try {
       await _client.read2File(
         remotePath,
         localPath,
         onProgress: (count, total) {
-          if (onProgress != null && total > 0) {
-            onProgress(count / total);
-          }
+          onProgress?.call(count, total);
         },
       );
     } catch (e) {
@@ -187,20 +185,18 @@ class WebdavService {
     }
   }
 
-  /// 上传本地文件到远程路径，onProgress 回调 0.0~1.0 的进度
+  /// 上传本地文件到远程路径，onProgress 回调原始字节进度 (已传字节, 总字节)
   Future<void> uploadFromFile(
     File localFile,
     String remotePath, {
-    void Function(double progress)? onProgress,
+    void Function(num count, num total)? onProgress,
   }) async {
     try {
       await _client.writeFromFile(
         localFile.path,
         remotePath,
         onProgress: (count, total) {
-          if (onProgress != null && total > 0) {
-            onProgress(count / total);
-          }
+          onProgress?.call(count, total);
         },
       );
     } catch (e) {
@@ -244,7 +240,7 @@ class WebdavService {
     String remotePath,
     String name, {
     required bool persistent,
-    void Function(double progress)? onProgress,
+    void Function(num count, num total)? onProgress,
   }) async {
     try {
       final dir = persistent ? await _documentsDir() : await _cacheDir();
