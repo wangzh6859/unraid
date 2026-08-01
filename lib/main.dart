@@ -4,7 +4,11 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // 启动时读取保存的主题预设并应用（设置页里可随时切换）
+  final presetIndex = await StorageService().loadThemePresetIndex();
+  ThemeController.apply(ThemePreset.fromIndex(presetIndex));
   runApp(const UnraidMobileApp());
 }
 
@@ -13,13 +17,23 @@ class UnraidMobileApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Unraid Mobile',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
-      darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.dark,
-      home: const _StartupGate(),
+    return ValueListenableBuilder<ThemePreset>(
+      valueListenable: ThemeController.current,
+      builder: (context, preset, _) {
+        final brightness = preset.brightness;
+        return MaterialApp(
+          title: 'Unraid Mobile',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          themeMode: brightness == null
+              ? ThemeMode.system
+              : (brightness == Brightness.light
+                  ? ThemeMode.light
+                  : ThemeMode.dark),
+          home: const _StartupGate(),
+        );
+      },
     );
   }
 }
