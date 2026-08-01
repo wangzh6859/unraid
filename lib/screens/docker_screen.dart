@@ -126,7 +126,7 @@ class _DockerScreenState extends State<DockerScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.widgets_outlined, size: 48, color: AppColors.textFaint),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             Text('还没有 Docker 容器',
                 style: TextStyle(color: AppColors.textSecondary)),
           ],
