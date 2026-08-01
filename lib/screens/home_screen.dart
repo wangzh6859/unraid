@@ -89,8 +89,8 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 14),
+              const CircularProgressIndicator(),
+              const SizedBox(height: 14),
               Text(
                 '正在探测可用地址…',
                 style:
