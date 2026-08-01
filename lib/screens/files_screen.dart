@@ -267,8 +267,8 @@ class _FileBrowserState extends State<_FileBrowser> {
         onProgress: (count, total) {
           TransferManager.instance.update(
             task,
-            bytesDone: count,
-            bytesTotal: total,
+            bytesDone: count.toInt(),
+            bytesTotal: total.toInt(),
             progress: total > 0 ? count / total : 0,
           );
         },
@@ -301,8 +301,8 @@ class _FileBrowserState extends State<_FileBrowser> {
         onProgress: (count, total) {
           TransferManager.instance.update(
             task,
-            bytesDone: count,
-            bytesTotal: total,
+            bytesDone: count.toInt(),
+            bytesTotal: total.toInt(),
             progress: total > 0 ? count / total : 0,
           );
         },
