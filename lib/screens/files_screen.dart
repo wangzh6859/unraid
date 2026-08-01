@@ -96,21 +96,14 @@ class _NotConfigured extends StatelessWidget {
               style: TextStyle(color: AppColors.textSecondary, height: 1.6),
             ),
             const SizedBox(height: 20),
+            // 纯文字居中按钮（图标会破坏水平居中，去掉）
             ElevatedButton(
               onPressed: onOpenSettings,
               style: ElevatedButton.styleFrom(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
               ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.settings_rounded, size: 18),
-                  SizedBox(width: 8),
-                  Text('去设置'),
-                ],
-              ),
+              child: const Text('去设置'),
             ),
           ],
         ),
@@ -303,12 +296,13 @@ class _FileBrowserState extends State<_FileBrowser> {
     _transferActive = true;
     String? localPath;
     try {
-      final persistent =
-          await _storage.loadSaveLocation() == StorageService.saveLocationDocuments;
+      final location = await _storage.loadSaveLocation();
+      final customPath = await _storage.loadSaveLocationPath();
       localPath = await widget.webdav.downloadToLocal(
         entry.path,
         entry.name,
-        persistent: persistent,
+        location: location,
+        customPath: customPath,
         onProgress: (count, total) {
           TransferManager.instance.update(
             task,
