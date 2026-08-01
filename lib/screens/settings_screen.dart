@@ -21,7 +21,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _storage = StorageService();
 
   ConnectionInfo? _connection;
-  WebdavCredentials? _webdav;
 
   final _webdavUrlController = TextEditingController();
   final _webdavUserController = TextEditingController();
@@ -53,7 +52,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _connection = conn;
-      _webdav = webdav;
       if (webdav != null) {
         _webdavUrlController.text = webdav.url;
         _webdavUserController.text = webdav.username;
@@ -141,7 +139,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await WebdavService(creds).testConnection();
       await _storage.saveWebdav(creds);
       if (mounted) {
-        setState(() => _webdav = creds);
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('已保存')));
       }
@@ -174,7 +171,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _storage.clearWebdav();
     if (!mounted) return;
     setState(() {
-      _webdav = null;
       _webdavUrlController.clear();
       _webdavUserController.clear();
       _webdavPassController.clear();
@@ -243,11 +239,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.dns_rounded, size: 18, color: AppColors.textSecondary),
-              const SizedBox(width: 8),
-              const Text('服务器连接',
+              Icon(Icons.dns_rounded, size: 18, color: AppColors.textSecondary),
+              SizedBox(width: 8),
+              Text('服务器连接',
                   style: TextStyle(
                       fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
             ],
@@ -324,11 +320,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.folder_rounded, size: 18, color: AppColors.textSecondary),
-              const SizedBox(width: 8),
-              const Text('WebDAV 文件管理',
+              Icon(Icons.folder_rounded, size: 18, color: AppColors.textSecondary),
+              SizedBox(width: 8),
+              Text('WebDAV 文件管理',
                   style: TextStyle(
                       fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
             ],
@@ -457,9 +453,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: _onCacheChanged,
             ),
           ),
-          Row(
+          const Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: const [
+            children: [
               Text('50 MB',
                   style: TextStyle(fontSize: 11, color: AppColors.textFaint)),
               Text('5 GB',
