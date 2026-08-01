@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:webdav_client/webdav_client.dart' as webdav;
 
+import 'storage_service.dart';
+
 /// 对接 WebDAV 服务（比如你已经装好的 OpenList）的客户端封装。
 ///
 /// 这是完全独立于 GraphQL API 的一套连接——用你在 OpenList 里设置的
@@ -234,16 +236,52 @@ class WebdavService {
   }
 
   /// 下载文件到本地，返回本地路径（供系统应用打开）。
-  /// [persistent] 为 true 时保存到应用文档目录（持久保存，不受缓存清理影响）；
-  /// 为 false 时保存到应用缓存目录（默认，会被"缓存上限"自动清理）。
+  /// [location] 取值见 StorageService.saveLocation*：
+  ///   cache（0，默认，会被缓存上限清理）/ documents（1，持久保存）/
+  ///   custom（2，使用 [customPath] 手动指定的目录）。
+  /// 自定义目录不可写（比如 Android 分区存储限制）时自动回退到应用文档目录。
   Future<String> downloadToLocal(
     String remotePath,
     String name, {
-    required bool persistent,
+    required int location,
+    String? customPath,
     void Function(num count, num total)? onProgress,
   }) async {
+    final primary = _resolveDir(location, customPath);
     try {
-      final dir = persistent ? await _documentsDir() : await _cacheDir();
+      return await _downloadInto(primary, remotePath, name, onProgress);
+    } catch (_) {
+      // 回退到文档目录（缓存目录失败也回退，尽量保证能保存）
+      return await _downloadInto(
+          await _documentsDir(), remotePath, name, onProgress);
+    }
+  }
+
+  Future<Directory> _resolveDir(int location, String? customPath) async {
+    switch (location) {
+      case StorageService.saveLocationDocuments:
+        return await _documentsDir();
+      case StorageService.saveLocationCustom:
+        if (customPath == null || customPath.isEmpty) {
+          throw WebdavException('未选择自定义目录');
+        }
+        final dir = Directory(customPath);
+        if (!dir.existsSync()) {
+          dir.createSync(recursive: true);
+        }
+        return dir;
+      default:
+        return await _cacheDir();
+    }
+  }
+
+  Future<String> _downloadInto(
+    Directory dir,
+    String remotePath,
+    String name,
+    void Function(num count, num total)? onProgress,
+  ) async {
+    try {
       final localPath = '${dir.path}/${_safeFileName(name)}';
       await downloadToFile(remotePath, localPath, onProgress: onProgress);
       return localPath;
