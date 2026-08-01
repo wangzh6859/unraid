@@ -1,0 +1,63 @@
+name: unraid_mobile
+description: "一个用于远程管理 Unraid NAS 的手机应用"
+publish_to: 'none'
+
+# version 会在 CI 构建时通过 --build-name / --build-number 覆盖，
+# 这里的值仅用于本地开发时的占位。
+version: 1.0.0+1
+
+environment:
+  # flutter_launcher_icons 0.14.x 要求 Dart SDK >= 3.7.0（Flutter 3.29 自带的就是 3.7），
+  # 之前写的 >=3.4.0 太低，会导致 pub 依赖解析失败（Failed to update packages）。
+  sdk: '>=3.7.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # 网络请求（GraphQL over HTTP）
+  http: ^1.2.2
+
+  # 本地存储（NAS地址 / API Key / 主题偏好）
+  shared_preferences: ^2.3.2
+
+  # 点击后用系统浏览器打开 GitHub Release 页面下载新 APK
+  url_launcher: ^6.3.1
+
+  # 读取当前已安装 App 的版本号，用于"检查更新"对比
+  package_info_plus: ^8.1.1
+
+  # WebDAV 文件管理（对接 OpenList 等 WebDAV 服务）
+  webdav_client: ^1.2.1
+
+  # 文件管理：选择本地文件上传
+  file_picker: ^8.1.2
+
+  # 文件管理：获取应用缓存目录（下载文件的本地缓存）
+  path_provider: ^2.1.4
+
+  # 文件管理：调用系统应用打开下载的文件（图片/视频/文本预览）
+  open_filex: ^4.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  # 用于根据 assets/icon.png 自动生成所有分辨率的启动图标
+  flutter_launcher_icons: ^0.14.3
+
+# flutter_launcher_icons 的配置：
+# - image_path 是传统图标（旧版 Android / 兼容用）
+# - adaptive_icon_background / adaptive_icon_foreground 是 Android 8.0+
+#   的自适应图标（系统会自动做圆形/圆角方形等裁切）
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: false
+  image_path: "assets/icon.png"
+  adaptive_icon_background: "assets/icon_background.png"
+  adaptive_icon_foreground: "assets/icon_foreground.png"
+  min_sdk_android: 23
+
+flutter:
+  uses-material-design: true
