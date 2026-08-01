@@ -567,20 +567,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   )),
-          ] else if (!_netSupported) ...[
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Text(
-                '当前 Unraid 版本不支持实时网速接口（需要包含 metrics.network 的较新版本）',
-                style: TextStyle(color: AppColors.textFaint, fontSize: 12.5),
-              ),
-            ),
           ],
 
           // ------- 磁盘列表 -------
