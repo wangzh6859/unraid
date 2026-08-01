@@ -30,6 +30,10 @@ class StorageService {
   static const _keyCacheLimitMb = 'cache_limit_mb';
   static const _defaultCacheLimitMb = 500;
 
+  // webGUI 账号密码（用于电源控制 / SMART 等 GraphQL 之外的能力）
+  static const _keyWebguiUser = 'webgui_user';
+  static const _keyWebguiPass = 'webgui_pass';
+
   // 主题预设索引（对应 ThemePreset.values 的顺序）
   static const _keyThemePreset = 'theme_preset';
 
@@ -78,6 +82,7 @@ class StorageService {
     await prefs.remove(_legacyKeyHost);
     await prefs.remove(_legacyKeyUseHttps);
     await clearWebdav();
+    await clearWebgui();
   }
 
   // -------------------- WebDAV（文件管理，比如 OpenList）--------------------
@@ -119,6 +124,28 @@ class StorageService {
   Future<void> saveCacheLimitMb(int mb) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyCacheLimitMb, mb);
+  }
+
+  // -------------------- webGUI 系统登录（电源控制 / SMART 等）--------------------
+
+  Future<void> saveWebgui(String username, String password) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyWebguiUser, username);
+    await prefs.setString(_keyWebguiPass, password);
+  }
+
+  Future<({String username, String password})?> loadWebgui() async {
+    final prefs = await SharedPreferences.getInstance();
+    final user = prefs.getString(_keyWebguiUser);
+    final pass = prefs.getString(_keyWebguiPass);
+    if (user == null || user.isEmpty || pass == null || pass.isEmpty) return null;
+    return (username: user, password: pass);
+  }
+
+  Future<void> clearWebgui() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyWebguiUser);
+    await prefs.remove(_keyWebguiPass);
   }
 
   // -------------------- 主题 --------------------
