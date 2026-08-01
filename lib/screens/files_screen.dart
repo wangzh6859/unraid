@@ -294,10 +294,10 @@ class _FileBrowserState extends State<_FileBrowser> {
   Future<void> _downloadAndOpen(WebdavEntry entry) async {
     final task = TransferManager.instance.start(name: entry.name, isUpload: false);
     _transferActive = true;
+    final location = await _storage.loadSaveLocation();
+    final customPath = await _storage.loadSaveLocationPath();
     String? localPath;
     try {
-      final location = await _storage.loadSaveLocation();
-      final customPath = await _storage.loadSaveLocationPath();
       localPath = await widget.webdav.downloadToLocal(
         entry.path,
         entry.name,
@@ -326,12 +326,10 @@ class _FileBrowserState extends State<_FileBrowser> {
     }
     _transferActive = false;
 
-    // 缓存目录里的文件按"缓存上限"清理（文档目录的持久文件不受影响）
-    final location = await _storage.loadSaveLocation();
-    if (location == StorageService.saveLocationCache) {
-      final limitMb = await _storage.loadCacheLimitMb();
-      await widget.webdav.cleanupCache(limitMb);
-    }
+    // 预览/缓存文件统一放在保存目录的 temp 子目录，按"缓存上限"清理旧文件
+    final limitMb = await _storage.loadCacheLimitMb();
+    await widget.webdav.cleanupCache(limitMb,
+        location: location, customPath: customPath);
 
     if (!mounted) return;
     final result = await OpenFilex.open(localPath);
