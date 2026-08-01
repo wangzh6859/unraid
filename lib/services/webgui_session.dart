@@ -83,26 +83,28 @@ class WebguiSession {
     _cookies.clear();
     _loggedIn = false;
     try {
-      final resp = await http
-          .post(
-            _uri('/login'),
-            // 不自动跟随重定向：登录成功后的 302 响应里带着会话 cookie，
-            // 跟随会把它丢掉。
-            followRedirects: false,
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {
-              'username': username,
-              'password': password,
-            },
-          )
-          .timeout(const Duration(seconds: 12));
-      _absorbCookies(resp);
-      _loggedIn = _cookies.isNotEmpty;
-      if (!_loggedIn) {
-        throw WebguiSessionException(
-            '登录失败：用户名/密码错误（webGUI 只允许 root 登录，且需已设置 root 密码）');
+      final client = http.Client();
+      try {
+        final req = http.Request('POST', _uri('/login'));
+        req.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        req.body =
+            'username=${Uri.encodeQueryComponent(username)}&password=${Uri.encodeQueryComponent(password)}';
+        // 不自动跟随重定向：登录成功后的 302 响应里带着会话 cookie，
+        // 自动跟随会把中间响应的 Set-Cookie 丢掉。
+        req.followRedirects = false;
+        final streamed =
+            await client.send(req).timeout(const Duration(seconds: 12));
+        final resp = await http.Response.fromStream(streamed);
+        _absorbCookies(resp);
+        _loggedIn = _cookies.isNotEmpty;
+        if (!_loggedIn) {
+          throw WebguiSessionException(
+              '登录失败：用户名/密码错误（webGUI 只允许 root 登录，且需已设置 root 密码）');
+        }
+        return true;
+      } finally {
+        client.close();
       }
-      return true;
     } on WebguiSessionException {
       rethrow;
     } catch (e) {
