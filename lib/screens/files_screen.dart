@@ -96,10 +96,21 @@ class _NotConfigured extends StatelessWidget {
               style: TextStyle(color: AppColors.textSecondary, height: 1.6),
             ),
             const SizedBox(height: 20),
-            ElevatedButton.icon(
+            ElevatedButton(
               onPressed: onOpenSettings,
-              icon: const Icon(Icons.settings_rounded, size: 18),
-              label: const Text('去设置'),
+              style: ElevatedButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.settings_rounded, size: 18),
+                  SizedBox(width: 8),
+                  Text('去设置'),
+                ],
+              ),
             ),
           ],
         ),
