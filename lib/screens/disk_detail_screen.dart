@@ -39,7 +39,7 @@ class DiskDetailScreen extends StatelessWidget {
                         color: AppColors.surfaceElevated,
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const Icon(Icons.storage_rounded,
+                      child: Icon(Icons.storage_rounded,
                           color: AppColors.textSecondary),
                     ),
                     const SizedBox(width: 14),
@@ -48,11 +48,11 @@ class DiskDetailScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(disk.device.isNotEmpty ? disk.device : '未知设备路径',
-                              style: const TextStyle(
+                              style: TextStyle(
                                   color: AppColors.textSecondary, fontSize: 13)),
                           const SizedBox(height: 2),
                           Text(_typeLabel(disk.type),
-                              style: const TextStyle(
+                              style: TextStyle(
                                   color: AppColors.textPrimary,
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700)),
@@ -102,7 +102,7 @@ class DiskDetailScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('存储空间',
+                  Text('存储空间',
                       style: TextStyle(
                           color: AppColors.textPrimary,
                           fontWeight: FontWeight.w700,
@@ -119,7 +119,7 @@ class DiskDetailScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   Text('已用 ${disk.usedLabel} / 共 ${disk.totalLabel}',
-                      style: const TextStyle(
+                      style: TextStyle(
                           color: AppColors.textSecondary, fontSize: 13)),
                 ],
               ),
@@ -145,7 +145,7 @@ class DiskDetailScreen extends StatelessWidget {
           ),
 
           const SizedBox(height: 16),
-          const Text(
+          Text(
             '提示：官方 Unraid API 目前只提供粗粒度的 SMART 状态（正常/未知），暂不提供详细的 SMART 原始属性表（比如通电时长、重映射扇区数等）。',
             style: TextStyle(color: AppColors.textFaint, fontSize: 12, height: 1.5),
           ),
@@ -181,7 +181,7 @@ class DiskDetailScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label,
-                style: const TextStyle(fontSize: 11, color: AppColors.textFaint)),
+                style: TextStyle(fontSize: 11, color: AppColors.textFaint)),
             const SizedBox(height: 2),
             FittedBox(
               fit: BoxFit.scaleDown,
@@ -199,19 +199,19 @@ class DiskDetailScreen extends StatelessWidget {
   Widget _infoRow(String label, String? value) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: AppColors.border, width: 0.6)),
       ),
       child: Row(
         children: [
-          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+          Text(label, style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
           const Spacer(),
           Flexible(
             child: Text(
               (value == null || value.isEmpty) ? '未知' : value,
               textAlign: TextAlign.right,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+              style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
             ),
           ),
         ],
