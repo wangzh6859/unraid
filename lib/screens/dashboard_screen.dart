@@ -32,6 +32,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<TemperatureSensor>? _temps;
   List<GpuInfo>? _gpu;
   ({String username, String password})? _webgui;
+  WebguiSession? _nchanSession; // 复用 webGUI 会话，避免每 2 秒重新登录
 
   String? _errInfo;
   String? _errArray;
@@ -115,12 +116,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<List<NetworkRateInfo>> _fetchNchanRates() async {
     final wg = _webgui;
     if (wg == null) throw UnraidApiException('未配置系统登录');
-    final session = WebguiSession(
+    final session = _nchanSession ??= WebguiSession(
       baseUrl: widget.api.baseUrl,
       username: wg.username,
       password: wg.password,
     );
-    return session.fetchNchanNetworkRates();
+    try {
+      return await session.fetchNchanNetworkRates();
+    } catch (_) {
+      _nchanSession = null; // 会话可能失效，下次自动重新登录
+      rethrow;
+    }
   }
 
   /// 温度传感器：能力检测（连续失败 2 次停止轮询）
@@ -564,60 +570,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           const SizedBox(height: 16),
 
-          // ------- 存储空间（含磁盘明细）-------
-          if (_array != null && _array!.capacity.totalKb > 0)
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.sd_storage_rounded,
-                          size: 18, color: AppColors.textSecondary),
-                      const SizedBox(width: 8),
-                      Text('存储空间',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary)),
-                      const Spacer(),
-                      Text(
-                          '${_array!.capacity.usedPercent.toStringAsFixed(0)}%',
-                          style: TextStyle(
-                              fontSize: 13, color: AppColors.textSecondary)),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: LinearProgressIndicator(
-                      value: _array!.capacity.usedPercent / 100,
-                      minHeight: 8,
-                      backgroundColor: AppColors.border,
-                      valueColor: const AlwaysStoppedAnimation(AppColors.teal),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '已用 ${_array!.capacity.usedLabel} / 共 ${_array!.capacity.totalLabel}',
-                    style: TextStyle(
-                        fontSize: 12.5, color: AppColors.textFaint),
-                  ),
-                  if (_array!.disks.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Divider(color: AppColors.border, height: 20),
-                    ..._array!.disks.map((d) => _buildDiskRow(d)),
-                  ],
-                ],
-              ),
-            ),
-
           // ------- 网络：实时速率（不支持时退回静态网卡信息）-------
           if (_rates != null || (_info?.networkInterfaces.isNotEmpty ?? false)) ...[
             const SizedBox(height: 24),
@@ -677,6 +629,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   )),
           ],
+
+          const SizedBox(height: 16),
+
+          // ------- 存储空间（含磁盘明细）-------
+          if (_array != null && _array!.capacity.totalKb > 0)
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.sd_storage_rounded,
+                          size: 18, color: AppColors.textSecondary),
+                      const SizedBox(width: 8),
+                      Text('存储空间',
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary)),
+                      const Spacer(),
+                      Text(
+                          '${_array!.capacity.usedPercent.toStringAsFixed(0)}%',
+                          style: TextStyle(
+                              fontSize: 13, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: _array!.capacity.usedPercent / 100,
+                      minHeight: 8,
+                      backgroundColor: AppColors.border,
+                      valueColor: const AlwaysStoppedAnimation(AppColors.teal),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '已用 ${_array!.capacity.usedLabel} / 共 ${_array!.capacity.totalLabel}',
+                    style: TextStyle(
+                        fontSize: 12.5, color: AppColors.textFaint),
+                  ),
+                  if (_array!.disks.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Divider(color: AppColors.border, height: 20),
+                    ..._array!.disks.map((d) => _buildDiskRow(d)),
+                  ],
+                ],
+              ),
+            ),
 
           const SizedBox(height: 24),
         ],
