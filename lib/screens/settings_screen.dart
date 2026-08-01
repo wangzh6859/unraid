@@ -4,6 +4,7 @@ import '../services/storage_service.dart';
 import '../services/unraid_api.dart';
 import '../services/webdav_service.dart';
 import '../theme/app_theme.dart';
+import 'login_screen.dart';
 
 /// 设置页（所有登录/连接配置都集中在这里，改动保存后实时生效）：
 /// - 服务器连接：地址列表编辑 + API Key + 保存并应用 / 重新探测 / 断开连接
@@ -21,7 +22,6 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final _storage = StorageService();
 
-  ConnectionInfo? _connection;
   final List<TextEditingController> _addressControllers = [
     TextEditingController(),
   ];
@@ -67,7 +67,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
 
     setState(() {
-      _connection = conn;
       if (conn != null) {
         _apiKeyController.text = conn.apiKey;
         for (var i = 0; i < conn.addresses.length; i++) {
@@ -315,7 +314,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _buildCacheCard(),
                 const SizedBox(height: 16),
                 Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
                   child: Text(
                     '提示：服务器地址和 WebDAV 地址相互独立，可以指向不同的主机/端口；'
                     '所有配置改动在保存后立即生效，无需重启 App。',
