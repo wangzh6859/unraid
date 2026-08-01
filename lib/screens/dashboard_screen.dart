@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../models/system_stats.dart';
 import '../models/network_metrics.dart';
+import '../services/storage_service.dart';
 import '../services/unraid_api.dart';
+import '../services/webgui_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/usage_ring.dart';
 import 'disk_detail_screen.dart';
@@ -28,15 +30,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   MetricsSnapshot? _metrics;
   List<NetworkRateInfo>? _rates;
   List<TemperatureSensor>? _temps;
+  List<GpuInfo>? _gpu;
+  ({String username, String password})? _webgui;
 
   String? _errInfo;
   String? _errArray;
   String? _errMetrics;
 
-  // 实时网速：连续失败 2 次才认为该版本不支持，停止轮询并隐藏该区域
-  // （避免网络抖动导致一次失败就永久隐藏）
+  // 实时网速：优先 metrics.network（新版本）；不支持时回退到 nchan 频道抓取
   bool _netSupported = true;
   int _netFailures = 0;
+  bool _nchanSupported = true;
+  int _nchanFailures = 0;
 
   // 温度传感器（metrics.temperature）：同样做能力检测
   bool _tempSupported = true;
@@ -54,6 +59,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // 前台每 2 秒刷新实时数据（CPU/内存/网速/磁盘温度），
     // 系统信息（主机名/CPU 型号等静态内容）由下拉刷新更新
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshLive());
+    _loadWebgui();
+  }
+
+  Future<void> _loadWebgui() async {
+    final wg = await StorageService().loadWebgui();
+    if (mounted) setState(() => _webgui = wg);
   }
 
   @override
@@ -73,52 +84,77 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// 网络速率：优先 metrics.network，不支持时回退 nchan 频道（需系统登录）
+  Future<List<NetworkRateInfo>?> _fetchRatesWithFallback() async {
+    if (_netSupported) {
+      final r = await _guard(() => widget.api.fetchNetworkRates());
+      if (r.$1 != null) {
+        _netFailures = 0;
+        return r.$1;
+      }
+      _netFailures++;
+      if (_netFailures >= 2) {
+        _netSupported = false; // 该 Unraid 版本没有 metrics.network
+      }
+      return null;
+    }
+    if (_webgui != null && _nchanSupported) {
+      final r = await _guard(() => _fetchNchanRates());
+      if (r.$1 != null) {
+        _nchanFailures = 0;
+        return r.$1;
+      }
+      _nchanFailures++;
+      if (_nchanFailures >= 2) {
+        _nchanSupported = false;
+      }
+    }
+    return null;
+  }
+
+  Future<List<NetworkRateInfo>> _fetchNchanRates() async {
+    final wg = _webgui;
+    if (wg == null) throw UnraidApiException('未配置系统登录');
+    final session = WebguiSession(
+      baseUrl: widget.api.baseUrl,
+      username: wg.username,
+      password: wg.password,
+    );
+    return session.fetchNchanNetworkRates();
+  }
+
   Future<void> _loadAll() async {
     setState(() {
       _initialLoading = _info == null && _array == null && _metrics == null;
     });
 
-    final (info, infoErr) = await _guard(() => widget.api.fetchSystemInfo());
-    final (array, arrayErr) = await _guard(() => widget.api.fetchArraySnapshot());
-    final (metrics, metricsErr) = await _guard(() => widget.api.fetchMetricsSnapshot());
+    // 所有查询并行发起，避免串行等待拖慢加载
+    final fInfo = _guard(() => widget.api.fetchSystemInfo());
+    final fArray = _guard(() => widget.api.fetchArraySnapshot());
+    final fMetrics = _guard(() => widget.api.fetchMetricsSnapshot());
+    final fGpu = _guard(() => widget.api.fetchGpus());
+    final fTemps = _tempSupported
+        ? _guard(() => widget.api.fetchTemperatureSensors())
+        : Future.value((null, null));
+    final fRates = (_netSupported || (_webgui != null && _nchanSupported))
+        ? _fetchRatesWithFallback()
+        : Future.value(null);
 
-    var rates = _rates;
-    if (_netSupported) {
-      final r = await _guard(() => widget.api.fetchNetworkRates());
-      if (r.$1 != null) {
-        rates = r.$1;
-        _netFailures = 0;
-      } else {
-        _netFailures++;
-        if (_netFailures >= 2) {
-          _netSupported = false; // 该 Unraid 版本没有 metrics.network
-          rates = null;
-        }
-      }
-    }
-
-    List<TemperatureSensor>? temps;
-    if (_tempSupported) {
-      final t = await _guard(() => widget.api.fetchTemperatureSensors());
-      if (t.$1 != null) {
-        temps = t.$1;
-        _tempFailures = 0;
-      } else {
-        _tempFailures++;
-        if (_tempFailures >= 2) {
-          _tempSupported = false; // 该 Unraid 版本没有 metrics.temperature
-          temps = null;
-        }
-      }
-    }
+    final (info, infoErr) = await fInfo;
+    final (array, arrayErr) = await fArray;
+    final (metrics, metricsErr) = await fMetrics;
+    final (gpu, _) = await fGpu;
+    final (temps, _) = await fTemps;
+    final rates = await fRates;
 
     if (!mounted) return;
     setState(() {
       if (info != null) _info = info;
       if (array != null) _array = array;
       if (metrics != null) _metrics = metrics;
-      if (rates != null) _rates = rates;
+      if (gpu != null) _gpu = gpu;
       if (temps != null) _temps = temps;
+      if (rates != null) _rates = rates;
       _errInfo = infoErr;
       _errArray = arrayErr;
       _errMetrics = metricsErr;
@@ -129,44 +165,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// 静默刷新实时指标（失败不打扰用户，保留旧数据）
   Future<void> _refreshLive() async {
     _tick++;
-    final (metrics, _) = await _guard(() => widget.api.fetchMetricsSnapshot());
+    // 并行发起所有实时查询
+    final fMetrics = _guard(() => widget.api.fetchMetricsSnapshot());
+    final fRates = (_netSupported || (_webgui != null && _nchanSupported))
+        ? _fetchRatesWithFallback()
+        : Future.value(null);
+    final fTemps = _tempSupported
+        ? _guard(() => widget.api.fetchTemperatureSensors())
+        : Future.value((null, null));
+    final fArray = _tick % 2 == 0
+        ? _guard(() => widget.api.fetchArraySnapshot())
+        : Future.value((null, null));
 
-    List<NetworkRateInfo>? rates;
-    if (_netSupported) {
-      final r = await _guard(() => widget.api.fetchNetworkRates());
-      if (r.$1 != null) {
-        rates = r.$1;
-        _netFailures = 0;
-      } else {
-        _netFailures++;
-        if (_netFailures >= 2) {
-          _netSupported = false;
-          rates = null;
-        }
-      }
-    }
-
-    // 每 4 秒顺带刷新一次阵列/磁盘（温度、容量变化相对慢）
-    ArraySnapshot? array;
-    if (_tick % 2 == 0) {
-      final (arr, _) = await _guard(() => widget.api.fetchArraySnapshot());
-      array = arr;
-    }
-
-    List<TemperatureSensor>? temps;
-    if (_tempSupported) {
-      final t = await _guard(() => widget.api.fetchTemperatureSensors());
-      if (t.$1 != null) {
-        temps = t.$1;
-        _tempFailures = 0;
-      } else {
-        _tempFailures++;
-        if (_tempFailures >= 2) {
-          _tempSupported = false;
-          temps = null;
-        }
-      }
-    }
+    final (metrics, _) = await fMetrics;
+    final rates = await fRates;
+    final (temps, _) = await fTemps;
+    final (array, _) = await fArray;
 
     if (!mounted) return;
     setState(() {
@@ -496,7 +510,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (_errMetrics != null) _buildSectionError(_errMetrics!),
 
           // ------- GPU（静态信息 + lm-sensors 温度）-------
-          if ((_info?.gpu.isNotEmpty ?? false) || _gpuTempC != null) ...[
+          if ((_gpu?.isNotEmpty ?? false) || _gpuTempC != null) ...[
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -512,8 +526,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      _info != null && _info!.gpu.isNotEmpty
-                          ? _info!.gpu.map((g) => g.label).join(' / ')
+                      _gpu != null && _gpu!.isNotEmpty
+                          ? _gpu!.map((g) => g.label).join(' / ')
                           : 'GPU',
                       style: TextStyle(
                           fontWeight: FontWeight.w700,
