@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -5,14 +6,16 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 
 import '../services/storage_service.dart';
+import '../services/transfer_manager.dart';
 import '../services/webdav_service.dart';
 import '../theme/app_theme.dart';
 
 /// 文件管理页（WebDAV / OpenList）。
 ///
 /// - 连接配置在「设置」页里统一维护（地址自动补 /dav）
-/// - 未配置时提示去设置页
+/// - 右上角：新建/上传（+）与传输任务（⇅）
 /// - 支持：浏览 / 新建文件夹 / 上传 / 下载并打开 / 重命名 / 删除
+/// - 前台每 2 秒自动刷新；在子目录里按系统返回键回到上级目录
 class FilesScreen extends StatefulWidget {
   final VoidCallback onOpenSettings;
 
@@ -41,29 +44,6 @@ class _FilesScreenState extends State<FilesScreen> {
     if (mounted) setState(() => _checkingSaved = false);
   }
 
-  Future<void> _logout() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surfaceElevated,
-        title: const Text('退出登录？'),
-        content: const Text('会清除本地保存的 WebDAV 地址和密码，下次要重新输入。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('退出', style: TextStyle(color: AppColors.red)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await _storage.clearWebdav();
-    if (mounted) setState(() => _webdav = null);
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_checkingSaved) {
@@ -72,7 +52,7 @@ class _FilesScreenState extends State<FilesScreen> {
     if (_webdav == null) {
       return _NotConfigured(onOpenSettings: widget.onOpenSettings);
     }
-    return _FileBrowser(webdav: _webdav!, onLogout: _logout);
+    return _FileBrowser(webdav: _webdav!);
   }
 }
 
@@ -101,7 +81,7 @@ class _NotConfigured extends StatelessWidget {
                   const Icon(Icons.folder_rounded, color: Colors.black, size: 30),
             ),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               '还没有配置文件管理',
               style: TextStyle(
                   fontSize: 17,
@@ -109,7 +89,7 @@ class _NotConfigured extends StatelessWidget {
                   color: AppColors.textPrimary),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               '到设置页填写 OpenList（或其他 WebDAV 服务）的地址和账号密码即可，'
               '地址只填 OpenList 主页地址，/dav 会自动补全。',
               textAlign: TextAlign.center,
@@ -132,8 +112,7 @@ class _NotConfigured extends StatelessWidget {
 
 class _FileBrowser extends StatefulWidget {
   final WebdavService webdav;
-  final VoidCallback onLogout;
-  const _FileBrowser({required this.webdav, required this.onLogout});
+  const _FileBrowser({required this.webdav});
 
   @override
   State<_FileBrowser> createState() => _FileBrowserState();
@@ -144,12 +123,22 @@ class _FileBrowserState extends State<_FileBrowser> {
   String _path = '/';
   List<WebdavEntry> _entries = [];
   bool _loading = true;
+  bool _transferActive = false;
   String? _error;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // 前台每 2 秒静默刷新当前目录（传输过程中暂停，避免列表跳动）
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _silentRefresh());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -177,6 +166,18 @@ class _FileBrowserState extends State<_FileBrowser> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _silentRefresh() async {
+    if (_loading || _transferActive) return;
+    try {
+      final list = await widget.webdav.listDir(_path);
+      if (!mounted) return;
+      setState(() {
+        _entries = list;
+        _error = null;
+      });
+    } catch (_) {}
   }
 
   void _enterFolder(WebdavEntry entry) {
@@ -215,38 +216,6 @@ class _FileBrowserState extends State<_FileBrowser> {
   }
 
   // -------------------- 操作：新建 / 上传 / 下载 / 重命名 / 删除 --------------------
-
-  Future<void> _showFabs() async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.surfaceElevated,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.create_new_folder_rounded,
-                  color: AppColors.orange),
-              title: const Text('新建文件夹'),
-              onTap: () => Navigator.pop(ctx, 'mkdir'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.upload_file_rounded,
-                  color: AppColors.orange),
-              title: const Text('上传文件'),
-              onTap: () => Navigator.pop(ctx, 'upload'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (action == null || !mounted) return;
-    if (action == 'mkdir') {
-      await _createFolder();
-    } else if (action == 'upload') {
-      await _uploadFile();
-    }
-  }
 
   Future<void> _createFolder() async {
     final controller = TextEditingController();
@@ -289,40 +258,80 @@ class _FileBrowserState extends State<_FileBrowser> {
     }
 
     final remotePath = _joinPath(file.name);
-    var done = false;
-    await _runWithProgress('上传 ${file.name}', (onProgress) async {
+    final task = TransferManager.instance.start(name: file.name, isUpload: true);
+    _transferActive = true;
+    try {
       await widget.webdav.uploadFromFile(
         File(localPath),
         remotePath,
-        onProgress: onProgress,
+        onProgress: (count, total) {
+          TransferManager.instance.update(
+            task,
+            bytesDone: count,
+            bytesTotal: total,
+            progress: total > 0 ? count / total : 0,
+          );
+        },
       );
-      done = true;
-    });
-    if (done) {
+      TransferManager.instance.finish(task);
       _snack('上传完成');
       _load();
+    } on WebdavException catch (e) {
+      TransferManager.instance.finish(task, error: e.message);
+      _snack(e.message);
+    } catch (e) {
+      TransferManager.instance.finish(task, error: '$e');
+      _snack('上传失败：$e');
+    } finally {
+      _transferActive = false;
     }
   }
 
   Future<void> _downloadAndOpen(WebdavEntry entry) async {
+    final task = TransferManager.instance.start(name: entry.name, isUpload: false);
+    _transferActive = true;
     String? localPath;
-    var done = false;
-    await _runWithProgress('下载 ${entry.name}', (onProgress) async {
-      localPath = await widget.webdav
-          .downloadToCache(entry.path, entry.name, onProgress: onProgress);
-      done = true;
-    });
-    if (!done || localPath == null) return;
-    final savedPath = localPath!; // 闭包内赋值的变量不会被类型提升，用 ! 显式解包
+    try {
+      final persistent =
+          await _storage.loadSaveLocation() == StorageService.saveLocationDocuments;
+      localPath = await widget.webdav.downloadToLocal(
+        entry.path,
+        entry.name,
+        persistent: persistent,
+        onProgress: (count, total) {
+          TransferManager.instance.update(
+            task,
+            bytesDone: count,
+            bytesTotal: total,
+            progress: total > 0 ? count / total : 0,
+          );
+        },
+      );
+      TransferManager.instance.finish(task);
+    } on WebdavException catch (e) {
+      TransferManager.instance.finish(task, error: e.message);
+      _snack(e.message);
+      _transferActive = false;
+      return;
+    } catch (e) {
+      TransferManager.instance.finish(task, error: '$e');
+      _snack('下载失败：$e');
+      _transferActive = false;
+      return;
+    }
+    _transferActive = false;
 
-    // 按设置里的缓存上限清理旧文件
-    final limitMb = await _storage.loadCacheLimitMb();
-    await widget.webdav.cleanupCache(limitMb);
+    // 缓存目录里的文件按"缓存上限"清理（文档目录的持久文件不受影响）
+    final location = await _storage.loadSaveLocation();
+    if (location == StorageService.saveLocationCache) {
+      final limitMb = await _storage.loadCacheLimitMb();
+      await widget.webdav.cleanupCache(limitMb);
+    }
 
     if (!mounted) return;
-    final result = await OpenFilex.open(savedPath);
+    final result = await OpenFilex.open(localPath);
     if (result.type != ResultType.done) {
-      _snack('文件已保存到本地缓存目录');
+      _snack('文件已保存到本地（$localPath）');
     }
   }
 
@@ -349,9 +358,7 @@ class _FileBrowserState extends State<_FileBrowser> {
     );
     if (newName == null || newName.isEmpty || newName == entry.name) return;
 
-    final parent = _path == '/'
-        ? ''
-        : _path;
+    final parent = _path == '/' ? '' : _path;
     try {
       await widget.webdav.rename(
         entry.path,
@@ -404,50 +411,139 @@ class _FileBrowserState extends State<_FileBrowser> {
     }
   }
 
-  /// 带进度条的对话框；[run] 在对话框展示期间执行，通过 onProgress 更新进度。
-  Future<void> _runWithProgress(
-    String title,
-    Future<void> Function(void Function(double p) onProgress) run,
-  ) async {
-    // 先捕获根 Navigator：即使操作期间用户切走了 Tab 导致本页 dispose，
-    // 对话框也能正常关闭，不会卡在屏幕上。
-    final navigator = Navigator.of(context);
-    final progress = ValueNotifier<double>(0);
-    showDialog<void>(
+  // -------------------- 传输任务 --------------------
+
+  void _showTransfers() {
+    showModalBottomSheet<void>(
       context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.surfaceElevated,
-        title: Text(title, style: const TextStyle(fontSize: 16)),
-        content: ValueListenableBuilder<double>(
-          valueListenable: progress,
-          builder: (_, v, __) => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              LinearProgressIndicator(
-                value: v,
-                backgroundColor: AppColors.border,
-                color: AppColors.orange,
+      backgroundColor: AppColors.surfaceElevated,
+      builder: (ctx) => ListenableBuilder(
+        listenable: TransferManager.instance,
+        builder: (_, __) {
+          final tasks = TransferManager.instance.tasks;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        '传输任务',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (tasks.isNotEmpty)
+                        TextButton(
+                          onPressed: TransferManager.instance.clearFinished,
+                          child: const Text('清除已完成', style: TextStyle(fontSize: 12)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (tasks.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: Text(
+                          '暂无传输任务',
+                          style: TextStyle(color: AppColors.textFaint, fontSize: 13),
+                        ),
+                      ),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 320),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: tasks.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (_, i) {
+                          final t = tasks[i];
+                          return _buildTransferTile(t);
+                        },
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(height: 10),
-              Text('${(v * 100).toStringAsFixed(0)}%',
-                  style: const TextStyle(
-                      color: AppColors.textSecondary, fontSize: 12)),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
-    try {
-      await run((p) => progress.value = p);
-    } on WebdavException catch (e) {
-      _snack(e.message);
-    } catch (e) {
-      _snack('操作失败：$e');
-    } finally {
-      progress.dispose();
-      if (navigator.canPop()) navigator.pop();
-    }
+  }
+
+  Widget _buildTransferTile(TransferTask t) {
+    final color = switch (t.state) {
+      TransferState.running => AppColors.orange,
+      TransferState.done => AppColors.green,
+      TransferState.failed => AppColors.red,
+    };
+    final label = switch (t.state) {
+      TransferState.running => (t.isUpload ? '上传中' : '下载中'),
+      TransferState.done => '已完成',
+      TransferState.failed => '失败',
+    };
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                t.isUpload ? Icons.upload_rounded : Icons.download_rounded,
+                size: 16,
+                color: color,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  t.name,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                label,
+                style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: t.state == TransferState.done ? 1 : t.progress,
+              minHeight: 5,
+              backgroundColor: AppColors.border,
+              valueColor: AlwaysStoppedAnimation(color),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            t.error ?? t.progressLabel,
+            style: TextStyle(fontSize: 11, color: AppColors.textFaint),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
   }
 
   void _snack(String message) {
@@ -460,51 +556,59 @@ class _FileBrowserState extends State<_FileBrowser> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Column(
-          children: [
-            // 路径导航条（替代原来的内嵌 AppBar）
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-              child: Row(
-                children: [
-                  if (!_atRoot)
-                    IconButton(
-                      icon: const Icon(Icons.arrow_upward_rounded),
-                      onPressed: _goUp,
-                      tooltip: '返回上级',
-                    )
-                  else
-                    IconButton(
-                      icon: const Icon(Icons.logout_rounded),
-                      onPressed: widget.onLogout,
-                      tooltip: '退出登录',
-                    ),
-                  Expanded(
-                    child: Text(
-                      _atRoot ? '/' : _path,
-                      style: const TextStyle(
-                          color: AppColors.textSecondary, fontSize: 12.5),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+    // 系统返回键：在子目录时返回上级，根目录时才退出 App
+    return PopScope(
+      canPop: _atRoot,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && !_atRoot) _goUp();
+      },
+      child: Column(
+        children: [
+          // 顶部工具条：路径 + 右上角（传输任务、新建/上传）
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+            child: Row(
+              children: [
+                if (!_atRoot)
+                  IconButton(
+                    icon: const Icon(Icons.arrow_upward_rounded),
+                    onPressed: _goUp,
+                    tooltip: '返回上级',
+                  )
+                else
+                  const SizedBox(width: 48),
+                Expanded(
+                  child: Text(
+                    _atRoot ? '/' : _path,
+                    style: TextStyle(
+                        color: AppColors.textSecondary, fontSize: 12.5),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
-              ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.swap_vert_rounded),
+                  onPressed: _showTransfers,
+                  tooltip: '传输任务',
+                  color: AppColors.textSecondary,
+                ),
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.add_rounded, color: AppColors.orange),
+                  tooltip: '新建/上传',
+                  onSelected: (v) {
+                    if (v == 'mkdir') _createFolder();
+                    if (v == 'upload') _uploadFile();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'mkdir', child: Text('新建文件夹')),
+                    PopupMenuItem(value: 'upload', child: Text('上传文件')),
+                  ],
+                ),
+              ],
             ),
-            Expanded(child: _buildBody()),
-          ],
-        ),
-        Positioned(
-          right: 16,
-          bottom: 16,
-          child: FloatingActionButton(
-            onPressed: _showFabs,
-            backgroundColor: AppColors.orange,
-            child: const Icon(Icons.add_rounded, color: Colors.black),
           ),
-        ),
-      ],
+          Expanded(child: _buildBody()),
+        ],
+      ),
     );
   }
 
@@ -519,12 +623,12 @@ class _FileBrowserState extends State<_FileBrowser> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_rounded,
+              Icon(Icons.cloud_off_rounded,
                   size: 48, color: AppColors.textFaint),
               const SizedBox(height: 12),
               Text(_error!,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.textSecondary)),
+                  style: TextStyle(color: AppColors.textSecondary)),
               const SizedBox(height: 16),
               ElevatedButton(onPressed: _load, child: const Text('重试')),
             ],
@@ -533,7 +637,7 @@ class _FileBrowserState extends State<_FileBrowser> {
       );
     }
     if (_entries.isEmpty) {
-      return const Center(
+      return Center(
         child: Text('这个文件夹是空的',
             style: TextStyle(color: AppColors.textSecondary)),
       );
@@ -544,7 +648,7 @@ class _FileBrowserState extends State<_FileBrowser> {
       color: AppColors.orange,
       backgroundColor: AppColors.surface,
       child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 90),
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
         itemCount: _entries.length,
         itemBuilder: (context, i) {
           final entry = _entries[i];
@@ -562,16 +666,16 @@ class _FileBrowserState extends State<_FileBrowser> {
               leading: Icon(_iconFor(entry),
                   color: entry.isDir ? AppColors.orange : AppColors.textSecondary),
               title: Text(entry.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                       color: AppColors.textPrimary, fontSize: 14),
                   overflow: TextOverflow.ellipsis),
               subtitle: entry.isDir
                   ? null
                   : Text(entry.sizeLabel,
-                      style: const TextStyle(
+                      style: TextStyle(
                           color: AppColors.textFaint, fontSize: 12)),
               trailing: PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert_rounded,
+                icon: Icon(Icons.more_vert_rounded,
                     color: AppColors.textFaint),
                 onSelected: (v) => _handleAction(entry, v),
                 itemBuilder: (_) => [
