@@ -87,16 +87,17 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     if (_probing || _api == null) {
-      return Scaffold(
+      return const Scaffold(
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 14),
+              CircularProgressIndicator(),
+              SizedBox(height: 14),
               Text(
                 '正在探测可用地址…',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                style:
+                    TextStyle(color: AppColors.textSecondary, fontSize: 13),
               ),
             ],
           ),
