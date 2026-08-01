@@ -40,13 +40,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _initialLoading = true;
   bool _arrayBusy = false;
   Timer? _timer;
+  int _tick = 0;
 
   @override
   void initState() {
     super.initState();
     _loadAll();
-    // 前台每 5 秒刷新 CPU/内存/网速（磁盘温度变化慢，由下拉刷新更新）
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshLive());
+    // 前台每 2 秒刷新实时数据（CPU/内存/网速/磁盘温度），
+    // 系统信息（主机名/CPU 型号等静态内容）由下拉刷新更新
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshLive());
   }
 
   @override
@@ -105,6 +107,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// 静默刷新实时指标（失败不打扰用户，保留旧数据）
   Future<void> _refreshLive() async {
+    _tick++;
     final (metrics, _) = await _guard(() => widget.api.fetchMetricsSnapshot());
 
     List<NetworkRateInfo>? rates;
@@ -122,10 +125,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
 
+    // 每 4 秒顺带刷新一次阵列/磁盘（温度、容量变化相对慢）
+    ArraySnapshot? array;
+    if (_tick % 2 == 0) {
+      final (arr, _) = await _guard(() => widget.api.fetchArraySnapshot());
+      array = arr;
+    }
+
     if (!mounted) return;
     setState(() {
       if (metrics != null) _metrics = metrics;
       if (rates != null) _rates = rates;
+      if (array != null) _array = array;
     });
   }
 
@@ -206,13 +217,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_rounded,
+              Icon(Icons.cloud_off_rounded,
                   size: 48, color: AppColors.textFaint),
               const SizedBox(height: 12),
               Text(
                 _errInfo ?? _errArray ?? _errMetrics ?? '加载失败',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.textSecondary),
+                style: TextStyle(color: AppColors.textSecondary),
               ),
               const SizedBox(height: 16),
               ElevatedButton(onPressed: _loadAll, child: const Text('重试')),
@@ -336,7 +347,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Expanded(
                     child: Text(
                       '磁盘阵列 · ${_arrayLabel(_array!.arrayState)}',
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary,
                           fontSize: 13.5),
@@ -401,7 +412,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           _info?.cpuBrand.isNotEmpty == true
                               ? _info!.cpuBrand
                               : '未知处理器',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11.5,
                             color: AppColors.textSecondary,
                             fontWeight: FontWeight.w600,
@@ -414,7 +425,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       const SizedBox(height: 3),
                       Text(
                         _cpuTempAndSpeedLabel(),
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 11.5, color: AppColors.textFaint),
                         textAlign: TextAlign.center,
                       ),
@@ -435,7 +446,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _metrics == null
                             ? '--'
                             : '${_metrics!.memUsedLabel} / ${_metrics!.memTotalLabel}',
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 11.5, color: AppColors.textFaint),
                         textAlign: TextAlign.center,
                       ),
@@ -463,10 +474,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.sd_storage_rounded,
+                      Icon(Icons.sd_storage_rounded,
                           size: 18, color: AppColors.textSecondary),
                       const SizedBox(width: 8),
-                      const Text('存储空间',
+                      Text('存储空间',
                           style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
@@ -474,7 +485,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       const Spacer(),
                       Text(
                           '${_array!.capacity.usedPercent.toStringAsFixed(0)}%',
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 13, color: AppColors.textSecondary)),
                     ],
                   ),
@@ -491,7 +502,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 8),
                   Text(
                     '已用 ${_array!.capacity.usedLabel} / 共 ${_array!.capacity.totalLabel}',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 12.5, color: AppColors.textFaint),
                   ),
                 ],
@@ -503,21 +514,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 24),
             Row(
               children: [
-                const Text('网络',
+                Text('网络',
                     style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary)),
                 const SizedBox(width: 8),
                 if (_rates != null)
-                  const Tooltip(
-                    message: '每 5 秒自动刷新',
+                  Tooltip(
+                    message: '每 2 秒自动刷新',
                     child: Icon(Icons.info_outline_rounded,
                         size: 15, color: AppColors.textFaint),
                   ),
                 const Spacer(),
                 if (_rates != null)
-                  const Text('↓下载  ↑上传',
+                  Text('↓下载  ↑上传',
                       style: TextStyle(
                           fontSize: 11, color: AppColors.textFaint)),
               ],
@@ -537,7 +548,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.lan_rounded,
+                        Icon(Icons.lan_rounded,
                             size: 16, color: AppColors.textSecondary),
                         const SizedBox(width: 10),
                         Expanded(
@@ -545,13 +556,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             n.model != null && n.model!.isNotEmpty
                                 ? '${n.iface} · ${n.model}'
                                 : n.iface,
-                            style: const TextStyle(
+                            style: TextStyle(
                                 color: AppColors.textPrimary, fontSize: 14),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         Text(n.speedLabel,
-                            style: const TextStyle(
+                            style: TextStyle(
                                 color: AppColors.textSecondary, fontSize: 13)),
                       ],
                     ),
@@ -565,7 +576,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: AppColors.border),
               ),
-              child: const Text(
+              child: Text(
                 '当前 Unraid 版本不支持实时网速接口（需要包含 metrics.network 的较新版本）',
                 style: TextStyle(color: AppColors.textFaint, fontSize: 12.5),
               ),
@@ -575,7 +586,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // ------- 磁盘列表 -------
           if (_array != null && _array!.disks.isNotEmpty) ...[
             const SizedBox(height: 24),
-            const Text(
+            Text(
               '磁盘状态',
               style: TextStyle(
                   fontSize: 16,
@@ -608,7 +619,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(d.name,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       color: AppColors.textPrimary,
                                       fontSize: 14,
                                       fontWeight: FontWeight.w600),
@@ -618,7 +629,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 d.fsSizeKb > 0
                                     ? '${d.runStateLabel} · 已用 ${d.usedLabel}/${d.totalLabel}'
                                     : d.runStateLabel,
-                                style: const TextStyle(
+                                style: TextStyle(
                                     fontSize: 12, color: AppColors.textFaint),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -627,11 +638,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                         if (d.tempC != null) ...[
                           Text('${d.tempC}°C',
-                              style: const TextStyle(
+                              style: TextStyle(
                                   color: AppColors.textSecondary, fontSize: 13)),
                           const SizedBox(width: 6),
                         ],
-                        const Icon(Icons.chevron_right_rounded,
+                        Icon(Icons.chevron_right_rounded,
                             size: 20, color: AppColors.textFaint),
                       ],
                     ),
@@ -683,7 +694,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Text(
                   n.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 14,
                       fontWeight: FontWeight.w600),
@@ -692,7 +703,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 if (n.utilizationPercent != null)
                   Text(
                     '链路利用率 ${n.utilizationPercent!.toStringAsFixed(0)}%',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 11, color: AppColors.textFaint),
                   ),
               ],
@@ -719,11 +730,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.arrow_upward_rounded,
+                  Icon(Icons.arrow_upward_rounded,
                       size: 13, color: AppColors.orange),
                   const SizedBox(width: 2),
                   Text(n.txLabel,
-                      style: const TextStyle(
+                      style: TextStyle(
                           color: AppColors.orange,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700)),
