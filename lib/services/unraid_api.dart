@@ -152,7 +152,10 @@ class UnraidApi {
         info {
           os { hostname distro uptime }
           cpu { manufacturer brand cores threads speed packages { temp totalPower } }
-          devices { network { iface model speed } }
+          devices {
+            network { iface model speed }
+            gpu { type vendorname productid class }
+          }
         }
       }
     ''';
@@ -185,6 +188,28 @@ class UnraidApi {
   }
 
   // -------------------- 实时指标（CPU / 内存占用）--------------------
+
+  /// 温度传感器（CPU/GPU/磁盘/主板，来自 lm-sensors / smartctl / ipmi）
+  Future<List<TemperatureSensor>> fetchTemperatureSensors() async {
+    const query = r'''
+      query TemperatureSensors {
+        metrics {
+          temperature {
+            sensors {
+              name
+              type
+              current { value unit status }
+            }
+          }
+        }
+      }
+    ''';
+    final data = await _post(query);
+    final list = (data['metrics']?['temperature']?['sensors'] as List?) ?? [];
+    return list
+        .map((e) => TemperatureSensor.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
 
   Future<MetricsSnapshot> fetchMetricsSnapshot() async {
     const query = r'''
