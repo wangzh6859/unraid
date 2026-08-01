@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../models/system_stats.dart';
 import '../models/network_metrics.dart';
+import '../services/storage_service.dart';
 import '../services/unraid_api.dart';
+import '../services/webgui_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/usage_ring.dart';
 import 'disk_detail_screen.dart';
@@ -41,6 +43,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _arrayBusy = false;
   Timer? _timer;
   int _tick = 0;
+  ({String username, String password})? _webgui;
 
   @override
   void initState() {
@@ -49,6 +52,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // 前台每 2 秒刷新实时数据（CPU/内存/网速/磁盘温度），
     // 系统信息（主机名/CPU 型号等静态内容）由下拉刷新更新
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshLive());
+    _loadWebgui();
+  }
+
+  Future<void> _loadWebgui() async {
+    final wg = await StorageService().loadWebgui();
+    if (mounted) setState(() => _webgui = wg);
   }
 
   @override
@@ -201,6 +210,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } finally {
       if (mounted) setState(() => _arrayBusy = false);
     }
+  }
+
+  // -------------------- 系统电源控制（webGUI 会话）--------------------
+
+  Future<void> _confirmPower(String cmd, String title, String desc) async {
+    final wg = _webgui;
+    if (wg == null) return;
+    final ok = await _countdownConfirm(title, desc);
+    if (!ok || !mounted) return;
+    try {
+      final session = WebguiSession(
+        baseUrl: widget.api.baseUrl,
+        username: wg.username,
+        password: wg.password,
+      );
+      await session.sendBootCommand(cmd);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(cmd == 'reboot' ? '重启命令已发送，服务器即将重启' : '关机命令已发送，服务器即将关机'),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('操作失败：$e')));
+      }
+    }
+  }
+
+  /// 倒计时确认：默认 10 秒后自动执行，期间可取消
+  Future<bool> _countdownConfirm(String title, String desc) {
+    final completer = Completer<bool>();
+    // 先捕获 Navigator：即使等待期间页面被销毁，倒计时结束也能正常关掉对话框
+    final navigator = Navigator.of(context);
+    var seconds = 10;
+    late StateSetter dialogSetState;
+    Timer? timer;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) {
+          dialogSetState = setState;
+          return AlertDialog(
+            backgroundColor: AppColors.surfaceElevated,
+            title: Text(title),
+            content: Text('$desc\n\n$seconds 秒后自动执行，可点取消'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  timer?.cancel();
+                  completer.complete(false);
+                  Navigator.pop(ctx);
+                },
+                child: const Text('取消'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      seconds--;
+      dialogSetState(() {});
+      if (seconds <= 0) {
+        t.cancel();
+        completer.complete(true);
+        navigator.pop();
+      }
+    });
+    return completer.future;
   }
 
   @override
@@ -380,6 +462,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
           if (_errArray != null) _buildSectionError(_errArray!),
+
+          // ------- 系统控制（整机重启/关机，需要设置页配置 root 密码）-------
+          if (_webgui != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.power_settings_new_rounded,
+                      size: 18, color: AppColors.textSecondary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text('系统控制',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                            fontSize: 13.5)),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _confirmPower(
+                        'reboot', '重启 NAS？', '服务器将重启，所有服务会短暂中断。'),
+                    icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                    label: const Text('重启'),
+                    style: TextButton.styleFrom(foregroundColor: AppColors.blue),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _confirmPower(
+                        'powerdown', '关机 NAS？', '服务器将完全关机，需手动开机。'),
+                    icon: const Icon(Icons.power_settings_new_rounded, size: 18),
+                    label: const Text('关机'),
+                    style: TextButton.styleFrom(foregroundColor: AppColors.red),
+                  ),
+                ],
+              ),
+            ),
+          ],
 
           const SizedBox(height: 16),
 
@@ -583,7 +706,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ..._array!.disks.map((d) => InkWell(
                   borderRadius: BorderRadius.circular(16),
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => DiskDetailScreen(disk: d)),
+                    MaterialPageRoute(
+                        builder: (_) => DiskDetailScreen(
+                              disk: d,
+                              baseUrl: widget.api.baseUrl,
+                            )),
                   ),
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 10),
