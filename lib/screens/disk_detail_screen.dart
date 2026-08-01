@@ -1,19 +1,78 @@
 import 'package:flutter/material.dart';
+
 import '../models/system_stats.dart';
+import '../services/storage_service.dart';
+import '../services/webgui_session.dart';
 import '../theme/app_theme.dart';
 
-class DiskDetailScreen extends StatelessWidget {
+/// 磁盘详情页：健康 / SMART / 温度 / 容量 / 硬件信息。
+/// SMART 完整属性表通过 webGUI 会话（root 密码）从旧版页面抓取。
+class DiskDetailScreen extends StatefulWidget {
   final ArrayDiskInfo disk;
-  const DiskDetailScreen({super.key, required this.disk});
+  final String baseUrl;
+
+  const DiskDetailScreen({
+    super.key,
+    required this.disk,
+    required this.baseUrl,
+  });
+
+  @override
+  State<DiskDetailScreen> createState() => _DiskDetailScreenState();
+}
+
+class _DiskDetailScreenState extends State<DiskDetailScreen> {
+  List<SmartAttribute>? _smart;
+  String? _smartError;
+  bool _smartLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSmart();
+  }
+
+  Future<void> _loadSmart() async {
+    final creds = await StorageService().loadWebgui();
+    if (!mounted) return;
+    if (creds == null) {
+      setState(() => _smartError = '未配置系统登录（设置页 → 系统控制），无法获取 SMART 明细');
+      return;
+    }
+    setState(() => _smartLoading = true);
+    try {
+      final session = WebguiSession(
+        baseUrl: widget.baseUrl,
+        username: creds.username,
+        password: creds.password,
+      );
+      final device = widget.disk.device.replaceAll('/dev/', '');
+      final html = await session.fetchSmartPage(device);
+      final attrs = parseSmartAttributes(html);
+      if (!mounted) return;
+      setState(() {
+        _smart = attrs.isEmpty ? null : attrs;
+        if (attrs.isEmpty) _smartError = 'SMART 页面格式无法解析（请确认 webGUI 磁盘 SMART 页面地址）';
+        _smartLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _smartError = '$e';
+        _smartLoading = false;
+      });
+    }
+  }
 
   Color get _runStateColor {
-    if (!disk.isMounted) return AppColors.textFaint;
-    if (disk.isSpinning == null) return AppColors.textFaint;
-    return disk.isSpinning! ? AppColors.green : AppColors.yellow;
+    if (!widget.disk.isMounted) return AppColors.textFaint;
+    if (widget.disk.isSpinning == null) return AppColors.textFaint;
+    return widget.disk.isSpinning! ? AppColors.green : AppColors.yellow;
   }
 
   @override
   Widget build(BuildContext context) {
+    final disk = widget.disk;
     return Scaffold(
       appBar: AppBar(title: Text(disk.name)),
       body: ListView(
@@ -145,9 +204,105 @@ class DiskDetailScreen extends StatelessWidget {
           ),
 
           const SizedBox(height: 16),
-          Text(
-            '提示：官方 Unraid API 目前只提供粗粒度的 SMART 状态（正常/未知），暂不提供详细的 SMART 原始属性表（比如通电时长、重映射扇区数等）。',
-            style: TextStyle(color: AppColors.textFaint, fontSize: 12, height: 1.5),
+
+          // ------- SMART 完整属性（webGUI 会话抓取）-------
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text('SMART 属性',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary)),
+                    const Spacer(),
+                    if (_smartLoading)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (_smartLoading && _smart == null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: Text('正在获取 SMART 数据…',
+                          style: TextStyle(
+                              color: AppColors.textFaint, fontSize: 13)),
+                    ),
+                  )
+                else if (_smartError != null && _smart == null)
+                  Text(_smartError!,
+                      style: TextStyle(
+                          color: AppColors.textFaint, fontSize: 12, height: 1.5))
+                else if (_smart != null)
+                  ..._smart!.map((a) => _smartRow(a)),
+                const SizedBox(height: 8),
+                Text(
+                  'SMART 明细通过设置页配置的 root 密码（webGUI 会话）抓取；'
+                  '未配置或磁盘休眠时可能获取不到。',
+                  style: TextStyle(
+                      color: AppColors.textFaint, fontSize: 11, height: 1.5),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _smartRow(SmartAttribute a) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppColors.border, width: 0.6),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(a.name,
+                    style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis),
+                Text(
+                  '值 ${a.value} · 最差 ${a.worst} · 阈值 ${a.threshold}',
+                  style:
+                      TextStyle(color: AppColors.textFaint, fontSize: 10.5),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              a.rawValue,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
@@ -204,7 +359,8 @@ class DiskDetailScreen extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text(label, style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+          Text(label,
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
           const Spacer(),
           Flexible(
             child: Text(
