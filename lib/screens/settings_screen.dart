@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/storage_service.dart';
 import '../services/unraid_api.dart';
 import '../services/webdav_service.dart';
+import '../services/webgui_session.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
 
@@ -31,6 +32,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _webdavUserController = TextEditingController();
   final _webdavPassController = TextEditingController();
 
+  final _webguiUserController = TextEditingController(text: 'root');
+  final _webguiPassController = TextEditingController();
+
   double _cacheLimitMb = 500;
   int _themePresetIndex = 0;
   int _saveLocation = StorageService.saveLocationCache;
@@ -39,6 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _probing = false;
   bool _savingConnection = false;
   bool _webdavBusy = false;
+  bool _webguiBusy = false;
 
   @override
   void initState() {
@@ -64,6 +69,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final cacheMb = await _storage.loadCacheLimitMb();
     final themeIdx = await _storage.loadThemePresetIndex();
     final saveLoc = await _storage.loadSaveLocation();
+    final wg = await _storage.loadWebgui();
     if (!mounted) return;
 
     setState(() {
@@ -81,6 +87,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _webdavUrlController.text = webdav.url;
         _webdavUserController.text = webdav.username;
         _webdavPassController.text = webdav.password;
+      }
+      if (wg != null) {
+        _webguiUserController.text = wg.username;
+        _webguiPassController.text = wg.password;
       }
       _cacheLimitMb = cacheMb.toDouble();
       _themePresetIndex = themeIdx;
@@ -240,6 +250,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // -------------------- webGUI 系统登录 --------------------
+
+  String? get _activeAddress =>
+      _enteredAddresses.isNotEmpty ? _enteredAddresses.first : null;
+
+  Future<WebguiSession?> _buildWebguiSession() async {
+    final address = _activeAddress;
+    if (address == null) {
+      _toast('请先填写服务器地址');
+      return null;
+    }
+    final user = _webguiUserController.text.trim();
+    final pass = _webguiPassController.text;
+    if (user.isEmpty || pass.isEmpty) {
+      _toast('请填写用户名和密码');
+      return null;
+    }
+    return WebguiSession(baseUrl: address, username: user, password: pass);
+  }
+
+  Future<void> _testWebgui() async {
+    final session = await _buildWebguiSession();
+    if (session == null) return;
+    setState(() => _webguiBusy = true);
+    try {
+      await session.login();
+      _toast('登录成功（root 会话已建立）');
+    } on WebguiSessionException catch (e) {
+      _toast(e.message);
+    } catch (e) {
+      _toast('登录失败：$e');
+    } finally {
+      if (mounted) setState(() => _webguiBusy = false);
+    }
+  }
+
+  Future<void> _saveWebgui() async {
+    final session = await _buildWebguiSession();
+    if (session == null) return;
+    setState(() => _webguiBusy = true);
+    try {
+      await session.login();
+      await _storage.saveWebgui(
+          _webguiUserController.text.trim(), _webguiPassController.text);
+      _toast('已保存并验证通过');
+    } on WebguiSessionException catch (e) {
+      _toast(e.message);
+    } catch (e) {
+      _toast('登录失败：$e');
+    } finally {
+      if (mounted) setState(() => _webguiBusy = false);
+    }
+  }
+
   // -------------------- 主题 / 保存位置 / 缓存 --------------------
 
   Future<void> _onThemeChanged(int index) async {
@@ -306,6 +370,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _buildConnectionCard(),
                 const SizedBox(height: 16),
                 _buildWebdavCard(),
+                const SizedBox(height: 16),
+                _buildWebguiCard(),
                 const SizedBox(height: 16),
                 _buildThemeCard(),
                 const SizedBox(height: 16),
@@ -510,6 +576,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _buildWebguiCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionTitle(Icons.power_settings_new_rounded, '系统控制（root 密码）'),
+          const SizedBox(height: 6),
+          Text(
+            '用于 App 内实现整机重启/关机、SMART 明细等 GraphQL 接口没有的能力。'
+            '仅当你在 Unraid 里设置了 root 密码（webGUI 可登录）时可用。',
+            style: TextStyle(color: AppColors.textFaint, fontSize: 12, height: 1.5),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _webguiUserController,
+            decoration: const InputDecoration(
+              labelText: '用户名（默认 root）',
+              prefixIcon: Icon(Icons.person_outline_rounded),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _webguiPassController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: '密码',
+              prefixIcon: Icon(Icons.lock_outline_rounded),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _actionButton(
+                  icon: Icons.login_rounded,
+                  label: '测试登录',
+                  busy: _webguiBusy,
+                  onPressed: _testWebgui,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _actionButton(
+                  icon: Icons.save_rounded,
+                  label: '保存',
+                  busy: _webguiBusy,
+                  onPressed: _saveWebgui,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildThemeCard() {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -521,8 +649,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle(Icons.palette_rounded, '主题'),
-          const SizedBox(height: 4),
+          _buildSectionTitle(Icons.palette_rounded, '主题'),          const SizedBox(height: 4),
           for (var i = 0; i < ThemePreset.values.length; i++)
             RadioListTile<int>(
               dense: true,
