@@ -166,23 +166,78 @@ class WebguiSession {
   }
 }
 
-/// 从 SMART 页面 HTML 中解析 smartctl -A 属性表格。
-/// 兼容 <table> 和 <pre>（纯文本）两种展示形式。
+/// 从 SMART 页面 HTML 中解析 smartctl -A 属性表。
+/// 依次尝试三种格式：
+/// 1) HTML <table>（按表头对齐列）
+/// 2) smartctl -A 纯文本（单行一条属性）
+/// 3) 宽松匹配（无 ID/无 0x 标志位的变体）
 List<SmartAttribute> parseSmartAttributes(String html) {
-  // 去掉 HTML 标签，保留文本内容
-  final text = html
-      .replaceAll(RegExp(r'<script[\s\S]*?</script>', caseSensitive: false), '')
-      .replaceAll(RegExp(r'<style[\s\S]*?</style>', caseSensitive: false), '')
-      .replaceAll(RegExp(r'<[^>]+>'), ' ')
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&amp;', '&');
+  final table = _parseFromTable(html);
+  if (table.isNotEmpty) return table;
+
+  final text = _stripTags(html);
+  final attrs = _parseFromText(text);
+  if (attrs.isNotEmpty) return attrs;
+
+  return _parseFromTextLoose(text);
+}
+
+List<SmartAttribute> _parseFromTable(String html) {
+  final rows = <List<String>>[];
+  final trRe = RegExp(r'<tr[^>]*>([\s\S]*?)</tr>', caseSensitive: false);
+  for (final tr in trRe.allMatches(html)) {
+    final cells = <String>[];
+    final tdRe = RegExp(r'<t[dh][^>]*>([\s\S]*?)</t[dh]>', caseSensitive: false);
+    for (final td in tdRe.allMatches(tr.group(1)!)) {
+      cells.add(_stripTags(td.group(1)!).trim());
+    }
+    if (cells.isNotEmpty) rows.add(cells);
+  }
+  if (rows.isEmpty) return [];
+
+  // 找表头行，确定各列位置
+  int? nameIdx, valueIdx, worstIdx, threshIdx, rawIdx;
+  for (final row in rows) {
+    final low = row.map((c) => c.toLowerCase()).toList();
+    final hasAttr = low.any((c) => c.contains('attribute'));
+    if (!hasAttr) continue;
+    nameIdx = low.indexWhere((c) => c.contains('attribute'));
+    valueIdx = low.indexWhere((c) => c == 'value' || c == 'val');
+    worstIdx = low.indexWhere((c) => c.contains('worst'));
+    threshIdx = low.indexWhere((c) => c.contains('thresh'));
+    rawIdx = low.indexWhere((c) => c.contains('raw'));
+    break;
+  }
+  if (nameIdx == null) return [];
+
+  String cell(List<String> row, int? idx, String fallback) =>
+      (idx != null && idx < row.length) ? row[idx] : fallback;
 
   final attrs = <SmartAttribute>[];
-  // smartctl -A 文本格式：ID# ATTRIBUTE_NAME FLAG VALUE WORST THRESH TYPE UPDATED WHEN_FAILED RAW_VALUE
+  for (final row in rows) {
+    final id = int.tryParse(row.first.trim());
+    if (id == null || row.length <= nameIdx) continue;
+    attrs.add(SmartAttribute(
+      id: id,
+      name: cell(row, nameIdx, ''),
+      value: int.tryParse(cell(row, valueIdx, '0')) ?? 0,
+      worst: int.tryParse(cell(row, worstIdx, '0')) ?? 0,
+      threshold: int.tryParse(cell(row, threshIdx, '0')) ?? 0,
+      type: '',
+      whenFailed: '',
+      rawValue: cell(row, rawIdx, ''),
+    ));
+  }
+  return attrs;
+}
+
+List<SmartAttribute> _parseFromText(String text) {
+  final attrs = <SmartAttribute>[];
+  // ID ATTRIBUTE_NAME FLAG VALUE WORST THRESH TYPE UPDATED WHEN_FAILED RAW_VALUE
   final re = RegExp(
-      r'^\s*(\d+)\s+([A-Za-z0-9_\-]+)\s+0x[0-9a-fA-F]+\s+(\d+)\s+(\d+)\s+(\d+)\s+([A-Za-z_\-]+)\s+\S+\s+([^\s]*)\s+(.+)$');
+      r'^\s*(\d+)\s+([A-Za-z0-9_\-]+)\s+0x[0-9a-fA-F]+\s+(\d+)\s+(\d+)\s+(\d+)\s+([A-Za-z_\-]+)\s+\S+\s+(\S*)\s*(.*)$');
   for (final line in text.split('\n')) {
-    final m = re.firstMatch(line);
+    final m = re.firstMatch(line.trim());
     if (m == null) continue;
     attrs.add(SmartAttribute(
       id: int.parse(m.group(1)!),
@@ -196,4 +251,42 @@ List<SmartAttribute> parseSmartAttributes(String html) {
     ));
   }
   return attrs;
+}
+
+/// 宽松模式：允许没有 ID 号、没有 0x 标志位的行
+List<SmartAttribute> _parseFromTextLoose(String text) {
+  final attrs = <SmartAttribute>[];
+  final re = RegExp(
+      r'^\s*([A-Za-z0-9_\-]+)\s+(?:0x[0-9a-fA-F]+\s+)?(\d+)\s+(\d+)\s+(\d+)(?:\s+([A-Za-z_\-]+))?(?:\s+\S+)?(?:\s+(\S*))?\s*(.*)$');
+  for (final line in text.split('\n')) {
+    final m = re.firstMatch(line.trim());
+    if (m == null) continue;
+    final name = m.group(1)!;
+    if (name.toLowerCase() == 'attribute' ||
+        name.toLowerCase().contains('raw_read') == false && int.tryParse(name) != null) {
+      continue;
+    }
+    final id = int.tryParse(name);
+    if (id != null) continue; // 首列是数字时交给标准解析
+    attrs.add(SmartAttribute(
+      id: 0,
+      name: name,
+      value: int.parse(m.group(2)!),
+      worst: int.parse(m.group(3)!),
+      threshold: int.parse(m.group(4)!),
+      type: m.group(5) ?? '',
+      whenFailed: m.group(6) ?? '',
+      rawValue: m.group(7)?.trim() ?? '',
+    ));
+  }
+  return attrs;
+}
+
+String _stripTags(String html) {
+  return html
+      .replaceAll(RegExp(r'<script[\s\S]*?</script>', caseSensitive: false), '')
+      .replaceAll(RegExp(r'<style[\s\S]*?</style>', caseSensitive: false), '')
+      .replaceAll(RegExp(r'<[^>]+>'), ' ')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&');
 }
