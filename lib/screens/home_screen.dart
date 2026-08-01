@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/storage_service.dart';
 import '../services/unraid_api.dart';
 import '../services/update_service.dart';
+import '../services/webgui_session.dart';
 import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
 import 'docker_screen.dart';
@@ -27,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _filesEpoch = 0; // 从设置页改完 WebDAV 回来后，强制重建文件页
   final _storage = StorageService();
   UpdateInfo? _updateInfo;
+  ({String username, String password})? _webgui;
 
   @override
   void initState() {
@@ -54,6 +58,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _probing = false;
     });
     _checkUpdate();
+    final wg = await _storage.loadWebgui();
+    if (mounted) setState(() => _webgui = wg);
   }
 
   void _gotoLogin() {
@@ -79,6 +85,82 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted && info != null) {
       setState(() => _updateInfo = info);
     }
+  }
+
+  // -------------------- 系统电源控制（webGUI 会话）--------------------
+
+  Future<void> _confirmPower(String cmd, String title, String desc) async {
+    final wg = _webgui;
+    final api = _api;
+    if (wg == null || api == null) return;
+    final ok = await _countdownConfirm(title, desc);
+    if (!ok || !mounted) return;
+    try {
+      final session = WebguiSession(
+        baseUrl: api.baseUrl,
+        username: wg.username,
+        password: wg.password,
+      );
+      await session.sendBootCommand(cmd);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(cmd == 'reboot'
+              ? '重启命令已发送，服务器即将重启'
+              : '关机命令已发送，服务器即将关机'),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('操作失败：$e')));
+      }
+    }
+  }
+
+  /// 倒计时确认：默认 10 秒后自动执行，期间可取消
+  Future<bool> _countdownConfirm(String title, String desc) {
+    final completer = Completer<bool>();
+    // 先捕获 Navigator：即使等待期间页面被销毁，倒计时结束也能正常关掉对话框
+    final navigator = Navigator.of(context);
+    var seconds = 10;
+    late StateSetter dialogSetState;
+    Timer? timer;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) {
+          dialogSetState = setState;
+          return AlertDialog(
+            backgroundColor: AppColors.surfaceElevated,
+            title: Text(title),
+            content: Text('$desc\n\n$seconds 秒后自动执行，可点取消'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  timer?.cancel();
+                  completer.complete(false);
+                  Navigator.pop(ctx);
+                },
+                child: const Text('取消'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      seconds--;
+      dialogSetState(() {});
+      if (seconds <= 0) {
+        t.cancel();
+        completer.complete(true);
+        navigator.pop();
+      }
+    });
+    return completer.future;
   }
 
   @override
@@ -137,6 +219,25 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
           ],
         ),
+        actions: [
+          // 首页（仪表盘）右上角：整机重启/关机（需设置页配置 root 密码）
+          if (_tabIndex == 0 && _webgui != null) ...[
+            IconButton(
+              onPressed: () => _confirmPower(
+                  'reboot', '重启 NAS？', '服务器将重启，所有服务会短暂中断。'),
+              icon: const Icon(Icons.restart_alt_rounded),
+              color: AppColors.blue,
+              tooltip: '重启 NAS',
+            ),
+            IconButton(
+              onPressed: () => _confirmPower(
+                  'powerdown', '关机 NAS？', '服务器将完全关机，需手动开机。'),
+              icon: const Icon(Icons.power_settings_new_rounded),
+              color: AppColors.red,
+              tooltip: '关机',
+            ),
+          ],
+        ],
       ),
       body: Column(
         children: [
