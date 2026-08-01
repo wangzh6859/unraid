@@ -16,7 +16,7 @@ enum ThemePreset {
   const ThemePreset(this.label, this.brightness, this.accent);
 
   static ThemePreset fromIndex(int index) {
-    final values = ThemePreset.values;
+    const values = ThemePreset.values;
     if (index < 0 || index >= values.length) return ThemePreset.darkOrange;
     return values[index];
   }
