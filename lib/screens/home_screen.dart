@@ -67,8 +67,11 @@ class _HomeScreenState extends State<HomeScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
-    // 从设置页返回：WebDAV 配置可能被修改，强制文件页重新读取
-    if (mounted) setState(() => _filesEpoch++);
+    // 从设置页返回：连接配置 / WebDAV 配置都可能被修改，
+    // 重新加载连接（重新探测当前地址）并强制文件页重建。
+    if (!mounted) return;
+    setState(() => _filesEpoch++);
+    await _init();
   }
 
   Future<void> _checkUpdate() async {
@@ -78,16 +81,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _logout() async {
-    await _storage.clear();
-    if (!mounted) return;
-    _gotoLogin();
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_probing || _api == null) {
-      return const Scaffold(
+      return Scaffold(
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -134,19 +131,12 @@ class _HomeScreenState extends State<HomeScreen> {
             if (_activeAddress != null)
               Text(
                 _activeAddress!.replaceFirst('://', ' · '),
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 10.5, color: AppColors.textFaint),
                 overflow: TextOverflow.ellipsis,
               ),
           ],
         ),
-        actions: [
-          IconButton(
-            onPressed: _logout,
-            icon: const Icon(Icons.logout_rounded),
-            tooltip: '断开连接',
-          ),
-        ],
       ),
       body: Column(
         children: [
