@@ -123,6 +123,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return session.fetchNchanNetworkRates();
   }
 
+  /// 温度传感器：能力检测（连续失败 2 次停止轮询）
+  Future<List<TemperatureSensor>?> _fetchTempsWithFallback() async {
+    if (!_tempSupported) return null;
+    final t = await _guard(() => widget.api.fetchTemperatureSensors());
+    if (t.$1 != null) {
+      _tempFailures = 0;
+      return t.$1;
+    }
+    _tempFailures++;
+    if (_tempFailures >= 2) {
+      _tempSupported = false;
+    }
+    return null;
+  }
+
   Future<void> _loadAll() async {
     setState(() {
       _initialLoading = _info == null && _array == null && _metrics == null;
@@ -134,8 +149,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final fMetrics = _guard(() => widget.api.fetchMetricsSnapshot());
     final fGpu = _guard(() => widget.api.fetchGpus());
     final fTemps = _tempSupported
-        ? _guard(() => widget.api.fetchTemperatureSensors())
-        : Future.value((null, null));
+        ? _fetchTempsWithFallback()
+        : Future.value(null);
     final fRates = (_netSupported || (_webgui != null && _nchanSupported))
         ? _fetchRatesWithFallback()
         : Future.value(null);
@@ -144,7 +159,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final (array, arrayErr) = await fArray;
     final (metrics, metricsErr) = await fMetrics;
     final (gpu, _) = await fGpu;
-    final (temps, _) = await fTemps;
+    final temps = await fTemps;
     final rates = await fRates;
 
     if (!mounted) return;
@@ -171,15 +186,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ? _fetchRatesWithFallback()
         : Future.value(null);
     final fTemps = _tempSupported
-        ? _guard(() => widget.api.fetchTemperatureSensors())
-        : Future.value((null, null));
+        ? _fetchTempsWithFallback()
+        : Future.value(null);
     final fArray = _tick % 2 == 0
         ? _guard(() => widget.api.fetchArraySnapshot())
         : Future.value((null, null));
 
     final (metrics, _) = await fMetrics;
     final rates = await fRates;
-    final (temps, _) = await fTemps;
+    final temps = await fTemps;
     final (array, _) = await fArray;
 
     if (!mounted) return;
