@@ -198,7 +198,8 @@ class WebguiSession {
 
   /// 通过 nchan 频道抓取实时网络速率（仪表盘数据源）。
   /// dynamix 仪表盘的网络面板订阅 /sub/update3，消息为 JSON，port 数组形如
-  /// [['eth0', '12.3 MB/s', '4.5 MB/s'], ...]（第 2/3 项是格式化字符串速率）。
+  /// [['eth0', '198.1 Kbps', '142.7 Kbps', ...], ...]
+  /// （第 2/3 项是格式化字符串速率，单位是 Kbps/Mbps/Gbps——注意是比特/秒）。
   /// nchan 支持 GET 长轮询，带会话 cookie 即可读取。
   Future<List<NetworkRateInfo>> fetchNchanNetworkRates() async {
     await _ensureLogin();
@@ -217,8 +218,16 @@ class WebguiSession {
     for (final p in ports) {
       final arr = p as List;
       if (arr.isEmpty) continue;
+      final name = arr[0].toString();
+      // 过滤回环/虚拟网口，只保留物理网口
+      if (name == 'lo' ||
+          name.startsWith('veth') ||
+          name.startsWith('docker') ||
+          name.startsWith('br-')) {
+        continue;
+      }
       rates.add(NetworkRateInfo(
-        name: arr[0].toString(),
+        name: name,
         operstate: null,
         rxSec: _parseRateString(arr.length > 1 ? arr[1].toString() : ''),
         txSec: _parseRateString(arr.length > 2 ? arr[2].toString() : ''),
@@ -232,13 +241,27 @@ class WebguiSession {
     return rates;
   }
 
-  /// 解析 "12.3 MB/s" / "456.7 kB/s" 这类格式化速率字符串 → 字节/秒
+  /// 解析 "198.1 Kbps" / "1.2 Mbps" / "12.3 MB/s" 这类格式化速率字符串 → 字节/秒。
+  /// bps 结尾的是比特/秒，需要 ÷8 转成字节/秒。
   static double _parseRateString(String s) {
-    final m = RegExp(r'^([\d.]+)\s*([kMGTPE]?)(?:i)?B/s$').firstMatch(s.trim());
+    final m = RegExp(
+            r'^([\d.]+)\s*([kMGTPE]?)(?:i)?(?:bps|Bps|b/s|B/s)$',
+            caseSensitive: false)
+        .firstMatch(s.trim());
     if (m == null) return 0;
     final v = double.tryParse(m.group(1)!) ?? 0;
-    const mult = {'': 1.0, 'k': 1e3, 'M': 1e6, 'G': 1e9, 'T': 1e12, 'P': 1e15, 'E': 1e18};
-    return v * (mult[m.group(2)!] ?? 1);
+    const mult = {
+      '': 1.0,
+      'k': 1e3,
+      'M': 1e6,
+      'G': 1e9,
+      'T': 1e12,
+      'P': 1e15,
+      'E': 1e18,
+    };
+    final raw = v * (mult[m.group(2)!.toLowerCase()] ?? 1);
+    final isBits = s.trim().toLowerCase().endsWith('bps');
+    return isBits ? raw / 8 : raw;
   }
 
   /// 系统更新检测（旧版端点，json=true 返回可用更新信息）
