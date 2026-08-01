@@ -76,12 +76,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final (metrics, metricsErr) = await _guard(() => widget.api.fetchMetricsSnapshot());
 
     var rates = _rates;
-    String? ratesErr;
     if (_netSupported) {
       final r = await _guard(() => widget.api.fetchNetworkRates());
-      rates = r.$1;
-      ratesErr = r.$2;
       if (r.$1 != null) {
+        rates = r.$1;
         _netFailures = 0;
       } else {
         _netFailures++;
