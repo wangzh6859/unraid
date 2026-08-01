@@ -152,15 +152,30 @@ class UnraidApi {
         info {
           os { hostname distro uptime }
           cpu { manufacturer brand cores threads speed packages { temp totalPower } }
-          devices {
-            network { iface model speed }
-            gpu { type vendorname productid class }
-          }
+          devices { network { iface model speed } }
         }
       }
     ''';
     final data = await _post(query);
     return SystemInfoSnapshot.fromJson(data);
+  }
+
+  /// GPU 静态信息（独立查询：某些版本 type 字段返回 null 会导致整个查询失败）
+  Future<List<GpuInfo>> fetchGpus() async {
+    const query = r'''
+      query Gpus {
+        info {
+          devices {
+            gpu { type vendorname productid }
+          }
+        }
+      }
+    ''';
+    final data = await _post(query);
+    final list = (data['info']?['devices']?['gpu'] as List?) ?? [];
+    return list
+        .map((g) => GpuInfo.fromJson(g as Map<String, dynamic>))
+        .toList();
   }
 
   // -------------------- 阵列 + 磁盘（容量 / 温度 / 状态 / SMART）--------------------
